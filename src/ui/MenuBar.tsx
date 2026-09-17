@@ -124,7 +124,7 @@ export function MenuBar() {
       ))}
       <span class="spacer" />
       {playing.value && (
-        <span class="playing-pill" onClick={() => stopPlayback()} title="Click to stop"><span class="dot" />Playing {fmtTime(playPos.value.elapsed)}</span>
+        <span class="playing-pill" onClick={() => stopPlayback()} title="Click to stop"><span class="dot" />Playing <span class="time">{fmtTime(playPos.value.elapsed)}</span></span>
       )}
       <IconBtn
         name={theme.value === 'dark' ? 'moon' : theme.value === 'light' ? 'sun' : 'monitor'}

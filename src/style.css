@@ -150,6 +150,7 @@ button.icon:disabled { color: var(--faint); }
 .menu .sep, .ctxmenu .sep { height: 1px; margin: 5px 6px; background: var(--border); }
 .menu .item.checked::before { content: '✓'; position: absolute; left: 10px; }
 .playing-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 600; font-size: 12px; cursor: pointer; }
+.playing-pill .time { font: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; -webkit-font-feature-settings: 'tnum'; font-feature-settings: 'tnum'; }
 .playing-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); animation: pulse 1s infinite; }
 @keyframes pulse { 50% { opacity: .3; } }
 
