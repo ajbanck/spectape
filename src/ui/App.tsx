@@ -9,7 +9,7 @@ import { active, tapes, dialog, dataWindow, setCursor, undo, redo, hex, hexBytes
 import { openWithFiles } from '../state/files';
 import { runCommand, isCommand, KEY_COMMANDS } from '../state/commands';
 import { playTape } from '../state/actions';
-import { platform } from '../platform';
+import { platform, isDesktop } from '../platform';
 import { playing, stopPlayback } from '../state/player';
 
 type EditableEl = HTMLInputElement | HTMLTextAreaElement;
@@ -123,6 +123,13 @@ export function App() {
       }
     };
     window.addEventListener('beforeunload', onBeforeUnload);
+    // The webview's own context menu (Reload, Back, …) makes no sense in an app window.
+    // Text fields keep theirs, so Cut/Copy/Paste stay where people expect them.
+    const onContextMenu = (e: MouseEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (!el?.closest('input, textarea')) e.preventDefault();
+    };
+    if (isDesktop) document.addEventListener('contextmenu', onContextMenu);
     // Files opened from the OS (desktop file associations / command line)
     let disposeChecks = () => {};
     platform().then((p) => {
@@ -145,6 +152,7 @@ export function App() {
       disposeChecks();
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('beforeunload', onBeforeUnload);
+      document.removeEventListener('contextmenu', onContextMenu);
     };
   }, []);
 
