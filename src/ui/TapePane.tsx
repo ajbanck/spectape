@@ -176,7 +176,7 @@ export function TapePane({ side, grow = 1 }: { side: Side; grow?: number }) {
   // keep the cursor row visible
   useEffect(() => {
     const el = listRef.current?.querySelector('.row.cursor') as HTMLElement | null;
-    el?.scrollIntoView({ block: 'nearest' });
+    if (listRef.current && el) scrollRowIntoView(listRef.current, el);
   }, [t.cursor, side]);
 
   const kinds = useMemo(() => t.blocks.map((b, i) => (isDataBlock(b) ? detectContent(t.blocks, i).label : '')), [t.blocks]);
@@ -212,8 +212,8 @@ export function TapePane({ side, grow = 1 }: { side: Side; grow?: number }) {
   while (playingRow > 0 && hidden[playingRow]) playingRow--;
   useEffect(() => {
     if (playingRow < 0) return;
-    const row = listRef.current?.querySelector(`.row[data-index="${playingRow}"]`);
-    row?.scrollIntoView({ block: 'nearest' });
+    const row = listRef.current?.querySelector(`.row[data-index="${playingRow}"]`) as HTMLElement | null;
+    if (listRef.current && row) scrollRowIntoView(listRef.current, row);
   }, [playingRow]);
 
   const onRowClick = (e: MouseEvent, i: number) => {
@@ -395,6 +395,15 @@ export function TapePane({ side, grow = 1 }: { side: Side; grow?: number }) {
 }
 
 /** Issues of blocks start..end, so a collapsed group or loop shows what it hides. */
+// Scrolls only the list. Element.scrollIntoView also scrolls overflow:hidden ancestors
+// (Safari 14 does so on every call), which shifted the whole window during playback.
+function scrollRowIntoView(list: HTMLElement, row: HTMLElement) {
+  const l = list.getBoundingClientRect();
+  const r = row.getBoundingClientRect();
+  if (r.top < l.top) list.scrollTop -= l.top - r.top;
+  else if (r.bottom > l.top + list.clientHeight) list.scrollTop += r.bottom - (l.top + list.clientHeight);
+}
+
 function rangeIssues(by: Map<number, Issue[]>, start: number, end: number): Issue[] {
   const out: Issue[] = [];
   for (let i = start; i <= end; i++) {
