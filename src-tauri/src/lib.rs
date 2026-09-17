@@ -36,8 +36,35 @@ fn set_menu_checked(app: tauri::AppHandle, id: String, checked: bool) {
     }
 }
 
+/// Without the WebView2 runtime the window cannot be created, and a release build has no console,
+/// so the app would exit without a word. Windows 11 always has the runtime and most Windows 10
+/// machines get it with Edge, but LTSC and locked-down installs may not; say so instead of
+/// vanishing. The installers fetch the runtime themselves, so this only bites the portable exe.
+#[cfg(windows)]
+fn require_webview2() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+
+    if tauri::webview_version().is_ok() {
+        return;
+    }
+    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let text = wide(concat!(
+        "SpecTape needs the Microsoft Edge WebView2 runtime, which this computer does not have.\n\n",
+        "Install it from https://developer.microsoft.com/microsoft-edge/webview2/ ",
+        "or run the SpecTape installer, which fetches it for you."
+    ));
+    let caption = wide("SpecTape");
+    unsafe {
+        MessageBoxW(std::ptr::null_mut(), text.as_ptr(), caption.as_ptr(), MB_OK | MB_ICONERROR);
+    }
+    std::process::exit(1);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(windows)]
+    require_webview2();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
