@@ -64,3 +64,17 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      # The bare exe, for running SpecTape without installing it. It carries the whole app
+      # (the front end is compiled in) and only needs the WebView2 runtime, which Windows 11
+      # and up-to-date Windows 10 already have.
+      - name: Attach the portable Windows exe
+        if: matrix.os == 'windows-latest' && github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = '${{ github.ref_name }}' -replace '^v', ''
+          $portable = "SpecTape_${version}_x64_portable.exe"
+          Copy-Item src-tauri/target/release/spectape.exe $portable
+          gh release upload ${{ github.ref_name }} $portable --clobber
