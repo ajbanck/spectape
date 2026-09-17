@@ -1,0 +1,39 @@
+{
+  "name": "spectape",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-2.0-or-later",
+  "type": "module",
+  "description": "ZX Spectrum TZX/TAP tape editor for the desktop and the browser",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "tauri": "tauri",
+    "desktop": "tauri dev",
+    "desktop:build": "tauri build --bundles app",
+    "desktop:dmg": "tauri build --bundles app,dmg",
+    "smoke": "node scripts/ui-smoke.mjs",
+    "samples": "node scripts/make-samples.mjs"
+  },
+  "dependencies": {
+    "@preact/signals": "^2.11.2",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-clipboard-manager": "^2.3.3",
+    "@tauri-apps/plugin-dialog": "^2.7.3",
+    "@tauri-apps/plugin-fs": "^2.5.2",
+    "pako": "^3.0.2",
+    "preact": "^10.29.8"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.6",
+    "@tauri-apps/cli": "^2.11.4",
+    "@types/pako": "^2.0.4",
+    "puppeteer-core": "^25.11.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
+  }
+}
