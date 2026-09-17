@@ -4,6 +4,7 @@ import { signal, computed } from '@preact/signals';
 import { Block, cloneBlock, isUnknown } from '../tzx/types';
 import { BlockCompareMode, TapeCompareMode, CompareResult, compareTapes, findMatches } from '../tzx/compare';
 import { groupRanges } from '../tzx/programs';
+import { platform } from '../platform';
 
 export type Side = 0 | 1;
 
@@ -85,6 +86,8 @@ export function applyTheme(t: Theme) {
   try { localStorage.setItem('spectape.theme', t); } catch { /* ignore */ }
   const dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  // So the next desktop start opens a window of the same colour instead of a white one.
+  platform().then((p) => p.rememberTheme(dark));
 }
 export function cycleTheme() {
   const order: Theme[] = ['system', 'light', 'dark'];

@@ -43,6 +43,10 @@ export const webPlatform: Platform = {
   openInEmulator() {
     return Promise.reject(new Error('A web page cannot start an emulator'));
   },
+  ready() { /* the browser paints as it likes */ },
+
+  rememberTheme() { /* no window to colour */ },
+
   readClipboard() {
     return navigator.clipboard.readText();
   },

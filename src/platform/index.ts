@@ -48,6 +48,10 @@ export interface Platform {
   /** System clipboard text access for text fields when the native menu is used. */
   readClipboard(): Promise<string>;
   writeClipboard(text: string): Promise<void>;
+  /** The UI has painted; the desktop window may be shown (no-op on the web). */
+  ready(): void;
+  /** Remember the resolved theme so the next window opens in that colour (desktop). */
+  rememberTheme(dark: boolean): void;
 }
 
 export const isDesktop: boolean = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;

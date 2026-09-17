@@ -59,6 +59,13 @@ export const tauriPlatform: Platform = {
   },
   detectEmulator: () => invoke<string | null>('detect_emulator'),
   openInEmulator: ({ bytes, name, program, args }) => invoke<string>('open_in_emulator', { bytes: Array.from(bytes), name, program, args }),
+  ready() {
+    // Only for the SPECTAPE_TIMING breakdown; the window is already on screen.
+    invoke('front_end_ready', { uiMs: performance.now(), timeOrigin: performance.timeOrigin });
+  },
+  rememberTheme(dark) {
+    invoke('remember_theme', { dark });
+  },
   readClipboard: () => readText(),
   writeClipboard: (t) => writeText(t),
 };
