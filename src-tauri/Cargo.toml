@@ -1,6 +1,6 @@
 [package]
 name = "spectape"
-version = "0.2.1"
+version = "0.2.2"
 description = "ZX Spectrum TZX/TAP tape editor"
 authors = ["ajbanck"]
 license = "GPL-2.0-or-later"
