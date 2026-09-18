@@ -892,8 +892,18 @@ itself now, which is a generation comparison and costs nothing when nothing has 
 
 The macOS platform menu and the keyboard shortcuts were never affected: `handle_menu` and
 `handle_keys` both run before the refresh. That is also why the headless tests missed it — they
-load tapes *between* frames, never inside one, so a command that runs mid-frame is a shape the
-test layer still cannot reach on its own. Worth a seam, if another one of these turns up.
+load tapes *between* frames, never inside one.
+
+That hole is closed too. `Menu::fire_next_frame` is a test-only queue on the in-window bar that
+`bar` drains where a real click would be read, so the value takes the production path from there:
+a test can now run any command at the point in the frame the bar runs one. The sweep
+`every_command_survives_being_run_in_the_middle_of_a_frame` puts the whole table through it with
+groups in both panes, and checks afterwards that each pane's rows still describe the tape that is
+open. Without the `list::show` fix it fails on `new` — `len is 0 but the index is 9`, the same
+line the reported crash came from, reached by a different command. Twelve ids stay out of it,
+listed in `NOT_HEADLESS`: six open a native file dialog and would block the run, six reach for an
+audio device or another program. The pane toolbar cannot be driven instead, for that same reason —
+its interesting buttons are the file ones.
 
 What the episode actually cost was the hour before the line number. A Rust panic unwinds and exits
 101: macOS files no crash report for an exit, `~/Library/Logs/DiagnosticReports` stayed empty, and

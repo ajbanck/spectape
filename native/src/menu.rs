@@ -174,6 +174,10 @@ mod in_window {
         /// Check marks, by command id, pushed each frame from the store.
         checked: std::cell::RefCell<Vec<(&'static str, bool)>>,
         queue: Queue,
+        /// A click a test makes, delivered from where a real one comes from.
+        /// See `Menu::fire_next_frame`.
+        #[cfg(test)]
+        injected: std::cell::RefCell<Option<(String, usize)>>,
     }
 
     /// `.brand` in `style.css`: the cassette in a rounded square, then the
@@ -188,7 +192,17 @@ mod in_window {
 
     impl Menu {
         pub fn new() -> Menu {
-            Menu { checked: Vec::new().into(), queue: Queue::default() }
+            Menu {
+                checked: Vec::new().into(),
+                queue: Queue::default(),
+                #[cfg(test)]
+                injected: None.into(),
+            }
+        }
+
+        #[cfg(test)]
+        pub fn fire_next_frame(&self, id: &str, side: usize) {
+            self.injected.replace(Some((id.to_string(), side)));
         }
 
         pub fn set_state(&self, _enabled: &[bool], checked: &[bool]) {
@@ -250,6 +264,8 @@ mod in_window {
                     }
                 });
             });
+            #[cfg(test)]
+            let fired = fired.or_else(|| self.injected.borrow_mut().take());
             fired
         }
     }
@@ -289,6 +305,30 @@ impl Menu {
     #[allow(dead_code)]
     pub fn in_window() -> Menu {
         Menu::InWindow(in_window::Menu::new())
+    }
+
+    /// Pretend the user picked `id` from the bar on the next frame drawn.
+    ///
+    /// Three of the five places that call `commands::run` do it *during* a
+    /// frame, after `App::frame` has refreshed its caches and before the panes
+    /// are drawn: this bar, the pane toolbar a few lines above `list::show`,
+    /// and the context menu. Nothing in the test layer could reach that point —
+    /// tests either call a command between frames or draw a frame in which
+    /// nothing is clicked — and that is the gap a load in the middle of a frame
+    /// slipped through, leaving rows built for the tape that had just been
+    /// replaced. The toolbar's own buttons cannot stand in for it, because the
+    /// interesting ones open a native file dialog and would block the test.
+    ///
+    /// Only the queue is test-only; what happens to the value afterwards is the
+    /// production path, unchanged.
+    #[cfg(test)]
+    pub fn fire_next_frame(&self, id: &str, side: usize) {
+        match self {
+            #[cfg(target_os = "macos")]
+            Menu::Platform { bar, .. } => bar.fire_next_frame(id, side),
+            Menu::InWindow(m) => m.fire_next_frame(id, side),
+            Menu::Headless => panic!("a headless menu draws no bar to click"),
+        }
     }
 
     /// Whether `bar` has anything to draw this frame: everything but a test.

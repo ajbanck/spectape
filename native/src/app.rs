@@ -861,6 +861,77 @@ mod tests {
         }
     }
 
+    /// Commands that cannot run in a test: the first six open a native file
+    /// dialog and would block until someone dismissed it, the rest reach for an
+    /// audio device or launch another program. Everything else in the table is
+    /// swept below, so a command added later is covered without being listed
+    /// here — and if it turns out to need a dialog, this is the list to add it
+    /// to.
+    const NOT_HEADLESS: &[&str] = &[
+        "open",
+        "open-other",
+        "insert-file",
+        "save",
+        "save-as",
+        "save-tap",
+        "play",
+        "play-cursor",
+        "play-selection",
+        "emu-tape",
+        "emu-cursor",
+        "emu-selection",
+    ];
+
+    /// A name in `NOT_HEADLESS` that no longer matches a command is dead
+    /// weight, and worse, silently lets that command back into the sweep under
+    /// its new name — where it would open a file dialog and hang.
+    #[test]
+    fn the_commands_left_out_of_the_sweep_all_exist() {
+        for id in NOT_HEADLESS {
+            assert!(crate::menutable::item(id).is_some(), "{id:?} is not a command any more");
+        }
+    }
+
+    /// Every command, run where the menu bar runs one: during the frame, after
+    /// the row caches have been rebuilt and before the panes are drawn. That is
+    /// the point a tape can be swapped out from under a cache that has already
+    /// been built for the old one, and until `Menu::fire_next_frame` there was
+    /// no way to reach it from a test at all — the list panic that this guards
+    /// against went out in a release because of it.
+    #[test]
+    fn every_command_survives_being_run_in_the_middle_of_a_frame() {
+        for item in crate::menutable::flat() {
+            if item.id.is_empty() || NOT_HEADLESS.contains(&item.id) {
+                continue;
+            }
+            let ctx = egui::Context::default();
+            let mut store = Store::new(Settings::default());
+            // Groups and loops in both panes: `visible_rows` only reaches for a
+            // block when a row has a range, so a tape without one cannot show
+            // the mismatch this is here to catch.
+            store.tape_mut(0).load("left.tzx".into(), None, every_block(), None);
+            store.tape_mut(1).load("right.tzx".into(), None, every_block(), None);
+            let mut app = App::build(&ctx, Menu::in_window(), store, Instant::now(), 0, false);
+            app.store.set_cursor(0, 3, SelectMode::Single);
+            draw(&ctx, &mut app);
+
+            app.menu.fire_next_frame(item.id, 0);
+            draw(&ctx, &mut app);
+            // And again, because a command that opens a dialog does its work on
+            // the frame after the one it was picked on.
+            draw(&ctx, &mut app);
+
+            for side in 0..2 {
+                assert_eq!(
+                    app.rows[side].rows.len(),
+                    app.store.tape(side).blocks.len(),
+                    "after {:?} the rows of pane {side} describe a different tape",
+                    item.id
+                );
+            }
+        }
+    }
+
     /// The menu bar egui draws when the platform does not take one — Linux, and
     /// Windows if a window ever refuses muda's. It is drawn here whatever the
     /// platform, so the path is not left to a machine nobody is testing on.
