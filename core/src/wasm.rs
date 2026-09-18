@@ -7,6 +7,10 @@
 //! pointer followed by that many bytes of [`crate::wire`] payload, then frees
 //! both with [`core_free`]. `src/tzx/core.ts` is the other end.
 
+use crate::audio::{
+    block_duration, decode_csw_rle, emit_block, encode_wav, playback_order, playback_timeline, render_length,
+    render_tape, tape_duration, FlowOptions, RecordingSink, RenderOptions,
+};
 use crate::bits::{add_bits, drop_bits, flip_bytes, join_bits, shift_left_bits, shift_right_bits, BitData};
 use crate::compare::{blocks_equal, compare_tapes, find_matches, BlockCompareMode, TapeCompareMode};
 use crate::consistency::check_consistency;
@@ -24,11 +28,12 @@ use crate::spectrum::screen::{has_flash, render_screen, ScreenOptions};
 use crate::spectrum::z80dis::{disassemble, DisOptions};
 use crate::types::Block;
 use crate::wire::{
-    decode_basic_lines, decode_bit_data, decode_blocks, decode_header_info, decode_pokes_info,
-    encode_basic_lines, encode_bit_data, encode_blocks_answer, encode_bytes, encode_comparison,
-    encode_content, encode_described, encode_dis_lines, encode_error, encode_f64, encode_header_info,
-    encode_issues, encode_opt_string, encode_pokes_info, encode_programs, encode_ranges, encode_strings,
-    encode_tap, encode_tape, encode_u32s, encode_u8, encode_variables, encode_version, WIRE_VERSION,
+    decode_basic_lines, decode_bit_data, decode_blocks, decode_blocks_and_order, decode_header_info,
+    decode_pokes_info, encode_basic_lines, encode_bit_data, encode_blocks_answer, encode_bytes,
+    encode_comparison, encode_content, encode_described, encode_dis_lines, encode_duration, encode_error,
+    encode_f64, encode_header_info, encode_issues, encode_opt_string, encode_pokes_info, encode_programs,
+    encode_pulses, encode_ranges, encode_samples, encode_strings, encode_tap, encode_tape, encode_timeline,
+    encode_u32s, encode_u8, encode_variables, encode_version, WIRE_VERSION,
 };
 use crate::writer::{required_version, save_version, serialize_block, serialize_tap, serialize_tzx, Version};
 use std::alloc::{alloc, dealloc, Layout};
@@ -603,4 +608,138 @@ pub unsafe extern "C" fn core_format_number(_ptr: *const u8, _len: usize, v: f64
 
 fn basic_options(flags: u32) -> BasicOptions {
     BasicOptions { show_numbers: flags & 1 != 0, basic128: flags & 2 != 0, speccy_format: flags & 4 != 0 }
+}
+
+// ---- audio ----------------------------------------------------------------
+
+/// The order the blocks play in. `flags`: 1 stop at a 48k stop block.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_playback_order(ptr: *const u8, len: usize, flags: u32) -> *mut u8 {
+    let opts = FlowOptions { stop_at_48k: flags & 1 != 0, max_steps: None };
+    with_blocks(ptr, len, |blocks| encode_u32s(&playback_order(blocks, opts)))
+}
+
+/// T-states the first block of the payload takes on its own.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_block_duration(ptr: *const u8, len: usize) -> *mut u8 {
+    with_blocks(ptr, len, |blocks| encode_f64(blocks.first().map(block_duration).unwrap_or(0) as f64))
+}
+
+/// Seconds the whole tape takes, and the order it follows.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_tape_duration(ptr: *const u8, len: usize) -> *mut u8 {
+    with_blocks(ptr, len, |blocks| {
+        let (seconds, order) = tape_duration(blocks);
+        encode_duration(seconds, &order)
+    })
+}
+
+/// Where each block of the playback order starts.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of a block list followed by an order.
+#[no_mangle]
+pub unsafe extern "C" fn core_playback_timeline(ptr: *const u8, len: usize) -> *mut u8 {
+    with_order(ptr, len, |blocks, order| encode_timeline(&playback_timeline(blocks, order)))
+}
+
+/// How many samples a render of this order would produce.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of a block list followed by an order.
+#[no_mangle]
+pub unsafe extern "C" fn core_render_length(ptr: *const u8, len: usize, sample_rate: u32) -> *mut u8 {
+    with_order(ptr, len, |blocks, order| encode_f64(render_length(blocks, sample_rate, order) as f64))
+}
+
+/// Render the tape to samples. `mic` selects the MIC response over a square wave.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of a block list followed by an order.
+#[no_mangle]
+pub unsafe extern "C" fn core_render_tape(
+    ptr: *const u8,
+    len: usize,
+    sample_rate: u32,
+    mic: u32,
+    amplitude: f64,
+) -> *mut u8 {
+    let opts = RenderOptions { sample_rate, mic: mic != 0, amplitude };
+    with_order(ptr, len, |blocks, order| encode_samples(&render_tape(blocks, opts, order)))
+}
+
+/// Render the tape straight to a WAV file, which saves copying the samples out
+/// only to send them back in.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of a block list followed by an order.
+#[no_mangle]
+pub unsafe extern "C" fn core_render_wav(
+    ptr: *const u8,
+    len: usize,
+    sample_rate: u32,
+    mic: u32,
+    amplitude: f64,
+    bits: u32,
+) -> *mut u8 {
+    let opts = RenderOptions { sample_rate, mic: mic != 0, amplitude };
+    with_order(ptr, len, |blocks, order| {
+        let samples = render_tape(blocks, opts, order);
+        encode_bytes(&encode_wav(&samples, sample_rate, bits as u16))
+    })
+}
+
+/// Encode samples (little-endian `f32`) as a WAV file.
+///
+/// # Safety
+/// `ptr` must point at `len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn core_encode_wav(ptr: *const u8, len: usize, sample_rate: u32, bits: u32) -> *mut u8 {
+    let raw = slice(ptr, len);
+    let samples: Vec<f32> =
+        raw.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+    finish(encode_bytes(&encode_wav(&samples, sample_rate, bits as u16)))
+}
+
+/// The pulses one block produces, for callers that want the edge stream itself.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_block_pulses(ptr: *const u8, len: usize) -> *mut u8 {
+    with_blocks(ptr, len, |blocks| {
+        let mut sink = RecordingSink::default();
+        if let Some(b) = blocks.first() {
+            emit_block(&mut sink, b);
+        }
+        encode_pulses(&sink.pulses)
+    })
+}
+
+/// CSW v2 RLE pulse lengths, in samples.
+///
+/// # Safety
+/// `ptr` must point at `len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn core_decode_csw_rle(ptr: *const u8, len: usize) -> *mut u8 {
+    finish(encode_u32s(&decode_csw_rle(slice(ptr, len))))
+}
+
+/// Decode a block list plus a playback order, run `f` over them and lay the
+/// answer out the way [`respond`] does.
+unsafe fn with_order(ptr: *const u8, len: usize, f: impl Fn(&[Block], &[u32]) -> Vec<u8>) -> *mut u8 {
+    let payload = match decode_blocks_and_order(slice(ptr, len)) {
+        Ok((blocks, order)) => f(&blocks, &order),
+        Err(e) => encode_error(&e.0),
+    };
+    finish(payload)
 }

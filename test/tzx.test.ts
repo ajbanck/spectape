@@ -4,7 +4,10 @@ import { serializeTzx, serializeTap, requiredVersion, saveVersion } from '../src
 import { createBlock, Block, CREATABLE_IDS, isUnknown } from '../src/tzx/types';
 import { decodeHeader, encodeHeader, describeBlock } from '../src/tzx/describe';
 import { checkConsistency } from '../src/tzx/consistency';
-import { tapeDuration, playbackOrder, renderTape, renderLength, encodeWav, emitBlock, SampleSink, TSTATES_PER_SEC, PulseSink, playbackTimeline, positionAt, blockDuration, LEAD_TSTATES } from '../src/tzx/audio';
+import { tapeDuration, playbackOrder, renderTape, renderLength, encodeWav, TSTATES_PER_SEC, playbackTimeline, positionAt, blockDuration, LEAD_TSTATES } from '../src/tzx/audio';
+// The sinks moved into the Rust core; the frozen TypeScript still has them, and
+// this file's reference rendering is built on that.
+import { emitBlock, SampleSink, PulseSink } from './reference/audio';
 import { disassemble } from '../src/spectrum/z80dis';
 import { listBasic, decodeNumber } from '../src/spectrum/basic';
 import { compareTapes } from '../src/tzx/compare';

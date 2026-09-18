@@ -5,7 +5,7 @@ import { downloadBytes } from '../state/files';
 import { platform, isDesktop } from '../platform';
 import { createBlock, CREATABLE_IDS, BLOCK_NAMES, Block } from '../tzx/types';
 import { checkConsistency } from '../tzx/consistency';
-import { tapeDuration, renderTape, encodeWav, playbackOrder, blockDuration, TSTATES_PER_SEC } from '../tzx/audio';
+import { tapeDuration, renderWav, playbackOrder, blockDuration, TSTATES_PER_SEC } from '../tzx/audio';
 import { saveVersion, serializeTzx } from '../tzx/writer';
 import { describeBlock } from '../tzx/describe';
 import { detectPrograms } from '../tzx/programs';
@@ -201,8 +201,10 @@ function WavExport({ side }: { side: Side }) {
   const go = () => {
     setBusy(true);
     setTimeout(() => {
-      const samples = renderTape(t.blocks, { sampleRate: rate, mode: audioMode.value }, order);
-      downloadBytes(encodeWav(samples, rate, bits), t.name.replace(/\.(tzx|tap)$/i, '') + '.wav', 'audio/wav');
+      // One call: the samples of a long tape stay inside the core instead of
+      // being copied out only to be sent back for encoding.
+      const wav = renderWav(t.blocks, { sampleRate: rate, mode: audioMode.value }, bits, order);
+      downloadBytes(wav, t.name.replace(/\.(tzx|tap)$/i, '') + '.wav', 'audio/wav');
       setBusy(false);
       close();
     }, 20);

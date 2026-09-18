@@ -175,11 +175,32 @@ implementations before the TypeScript goes away:
    on the way: wire strings were Latin-1, which mangled the block graphics; Rust rounds a tie to
    the even digit where JavaScript rounds it up, which `toPrecision(8)` needs; and `Infinity`
    panicked the core, which in wasm means a trap, not an exception
-5. `audio.ts` last — the preallocated-buffer behaviour and `playbackTimeline` are subtle, and the
-   existing tests compare against the previous algorithm bit-for-bit
+5. ~~`audio.ts`~~ — **done** 2026-09-18. `core/src/audio.rs` holds the playback flow, the pulse
+   emission, the sample rendering and the WAV encoding. The tests that already compared the
+   renderer against the previous algorithm now compare it against the core: every pulse source at
+   two sample rates in both modes, sample for sample, plus the pulse streams, the timelines and
+   the WAV bytes including how JavaScript rounds a half. Two things stayed in TypeScript on
+   purpose: inflating Z-RLE CSW blocks, because that needs zlib and the crate has no dependencies,
+   so the app hands those blocks over already inflated; and `positionAt`, a binary search over an
+   array the caller already holds, which the progress indicator runs every animation frame.
+   `renderWav` was added so the WAV export renders and encodes in one call — the samples of a long
+   tape are tens of megabytes and crossing twice with them would be silly
 
 **Ships after each module.** At the end, all 3,130 lines of logic are Rust, proven in production
 through the existing app, and the browser version still works.
+
+### Where stage 2 landed
+
+All five module groups are done. What is left in TypeScript under `src/tzx` and `src/spectrum` is
+600 lines of signatures over the core, plus the plumbing: `core.ts` (the loader and one call per
+entry point), `wire.ts` (the byte format), `cache.ts`, `bytes.ts` and the block model in
+`types.ts`. The core is 6,600 lines of Rust with 45 tests of its own, and `test/reference/` holds
+2,548 lines of frozen TypeScript that `test/core.test.ts` checks it against in 95 tests.
+
+The differential tests earned their keep: they caught six real differences that would otherwise
+have shipped — the CSW length bug, Latin-1 wire strings mangling the block graphics, JavaScript's
+tie-breaking in `toPrecision`, a panic on `Infinity` (a trap, in wasm), POKE numbers truncating
+early, and a truncated POKEs block failing differently.
 
 **What stays in TypeScript until stage 4:** predicates and slices over the block model that the
 UI asks for per row and that carry no logic — `isMetadata`, `blockBody`, `payload`, `totalBits`,
@@ -187,20 +208,35 @@ and the `isDataBlock`/`hasData` pair that was always in `types.ts`. Crossing int
 costs more than it saves. The core has its own copy of each, and both sides assert the same table
 (`core/tests/logic.rs` and `test/core.test.ts`), so the copies cannot drift apart.
 
-**Bundle, and it needs attention:** 187.56 kB before stage 1, then 253.20 after the parser,
-335.10 after the writer and module 2, 372.00 after module 3, and **480.21 kB after the Spectrum
-side** (182.03 kB gzipped). The wasm itself is 236 kB. That is 293 kB of growth with only the
-audio module left, against the 200–400 kB the plan budgeted for the whole of stages 1 and 2, so
-this will land at the top of the range or just past it.
+### The bundle, and what to do about it
 
-Where it goes is measurable rather than mysterious: stubbing out the `toPrecision(8)`
-reimplementation alone takes 32 kB off, because it pulls in Rust's float-to-decimal machinery.
-That one is worth its size — it is what makes the BASIC listing show the same numbers as before —
-but the total deserves a proper look when the stage closes. Three things to try, cheapest first:
-`wasm-opt -Oz` from binaryen (not installed here; usually 10–20%), a `panic_immediate_abort`
-build of the standard library (needs nightly, which rustup here has, and would make the wasm
-build depend on it), and serving the module as a separate compressed asset instead of base64
-inside the bundle, which would give back the 33% the encoding costs.
+| after | bundle | gzipped |
+|---|---|---|
+| before stage 1 | 187.56 kB | 65.12 kB |
+| the parser | 253.20 kB | 92.71 kB |
+| the writer and module 2 | 335.10 kB | 122.76 kB |
+| module 3 | 372.00 kB | 135.93 kB |
+| the Spectrum side | 480.21 kB | 182.03 kB |
+| **audio, end of stage 2** | **492.70 kB** | **186.10 kB** |
+
+That is 305 kB of growth against the 200–400 kB the plan budgeted, so it landed inside the range
+but near the top. Where it goes is measurable rather than mysterious: the wasm is 249 kB, of which
+stubbing out the `toPrecision(8)` reimplementation alone takes 32 kB — that one earns its size,
+because it is what makes the BASIC listing show the same numbers as before.
+
+Three things to try, and what is known about each:
+
+1. **`wasm-opt -Oz`** (binaryen). Usually 10–20%, one line in `scripts/build-wasm.mjs`. Not
+   installed here; it would need `brew install binaryen` and a CI step.
+2. **Serve the module as its own asset** instead of base64 inside the bundle. The wasm gzips to
+   98 kB on its own, so this is the biggest single win available: the JS would fall to about
+   160 kB and the total transfer to roughly 145 kB gzipped, against 186 kB now. The cost is the
+   fetch-and-instantiate path that base64 was chosen to avoid — worth revisiting in stage 5,
+   where the desktop app stops being a web bundle at all.
+3. **A `panic_immediate_abort` build of the standard library.** Tried here: the nightly toolchain
+   installed on this machine cannot build `-Z build-std` (its `rust-src` does not match the
+   compiler). Worth another look on a machine where it does, but it would tie the wasm build to
+   nightly.
 
 **What the boundary costs, measured on a 3,000-block, 1.2 MB tape** (the size the plan measures
 rendering with): the app encodes the blocks onto the wire for every call, so calls that the UI

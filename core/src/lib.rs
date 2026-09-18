@@ -4,6 +4,7 @@
 //! plus the wasm ABI (`wasm`) and the byte format (`wire`) the TypeScript app
 //! calls them through.
 
+pub mod audio;
 pub mod bits;
 pub mod bytes;
 pub mod compare;

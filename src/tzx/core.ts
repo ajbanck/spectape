@@ -13,6 +13,7 @@ import {
 } from './types';
 import {
   decodeBasicLines, decodeBitData, decodeBlocks, decodeBytes, decodeComparison, decodeContent,
+  decodeDuration, decodePulses, decodeSamples, decodeTimeline, encodeBlocksAndOrder,
   decodeDescribed, decodeDisLines, decodeF64, decodeHeaderInfo, decodeIssues, decodeOptString,
   decodePokesInfo, decodePrograms, decodeRanges, decodeStrings, decodeTap, decodeTape, decodeU32s,
   decodeU8, decodeVariables, decodeVersion, encodeBasicLines, encodeBitData, encodeBlocks,
@@ -62,6 +63,16 @@ interface CoreExports {
   core_disassemble(ptr: number, len: number, offset: number, base: number, count: number, flags: number): number;
   core_decode_number(ptr: number, len: number, offset: number): number;
   core_format_number(ptr: number, len: number, v: number): number;
+  core_playback_order(ptr: number, len: number, flags: number): number;
+  core_block_duration(ptr: number, len: number): number;
+  core_tape_duration(ptr: number, len: number): number;
+  core_playback_timeline(ptr: number, len: number): number;
+  core_render_length(ptr: number, len: number, sampleRate: number): number;
+  core_render_tape(ptr: number, len: number, sampleRate: number, mic: number, amplitude: number): number;
+  core_render_wav(ptr: number, len: number, sampleRate: number, mic: number, amplitude: number, bits: number): number;
+  core_encode_wav(ptr: number, len: number, sampleRate: number, bits: number): number;
+  core_block_pulses(ptr: number, len: number): number;
+  core_decode_csw_rle(ptr: number, len: number): number;
 }
 
 /** The compare modes as `core/src/wasm.rs` numbers them. */
@@ -332,4 +343,58 @@ export function decodeNumberCore(data: Uint8Array, offset: number): number {
 
 export function formatNumberCore(v: number): string {
   return decodeOptString(call('core_format_number', NO_INPUT, v)) ?? '';
+}
+
+/** How a block renders as pulses: what a PZX export or a waveform view would want. */
+export interface Pulse {
+  tstates: number;
+  level: 0 | 1;
+}
+
+export function playbackOrderCore(blocks: Block[], stopAt48k: boolean): number[] {
+  return decodeU32s(call('core_playback_order', encodeBlocks(blocks), stopAt48k ? 1 : 0));
+}
+
+export function blockDurationCore(block: Block): number {
+  return decodeF64(call('core_block_duration', encodeBlocks([block])));
+}
+
+export function tapeDurationCore(blocks: Block[]): { seconds: number; order: number[] } {
+  return decodeDuration(call('core_tape_duration', encodeBlocks(blocks)));
+}
+
+export function playbackTimelineCore(blocks: Block[], order: number[]): { starts: number[]; total: number } {
+  return decodeTimeline(call('core_playback_timeline', encodeBlocksAndOrder(blocks, order)));
+}
+
+export function renderLengthCore(blocks: Block[], sampleRate: number, order: number[]): number {
+  return decodeF64(call('core_render_length', encodeBlocksAndOrder(blocks, order), sampleRate));
+}
+
+export function renderTapeCore(
+  blocks: Block[], order: number[], sampleRate: number, mic: boolean, amplitude: number,
+): Float32Array {
+  const payload = encodeBlocksAndOrder(blocks, order);
+  return decodeSamples(call('core_render_tape', payload, sampleRate, mic ? 1 : 0, amplitude));
+}
+
+/** Render and encode in one call, so a long tape does not cross twice. */
+export function renderWavCore(
+  blocks: Block[], order: number[], sampleRate: number, mic: boolean, amplitude: number, bits: number,
+): Uint8Array {
+  const payload = encodeBlocksAndOrder(blocks, order);
+  return decodeBytes(call('core_render_wav', payload, sampleRate, mic ? 1 : 0, amplitude, bits));
+}
+
+export function encodeWavCore(samples: Float32Array, sampleRate: number, bits: number): Uint8Array {
+  const raw = new Uint8Array(samples.buffer, samples.byteOffset, samples.length * 4);
+  return decodeBytes(call('core_encode_wav', raw, sampleRate, bits));
+}
+
+export function blockPulsesCore(block: Block): Pulse[] {
+  return decodePulses(call('core_block_pulses', encodeBlocks([block])));
+}
+
+export function decodeCswRleCore(data: Uint8Array): number[] {
+  return decodeU32s(call('core_decode_csw_rle', data));
 }

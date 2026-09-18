@@ -735,3 +735,72 @@ pub fn encode_dis_lines(lines: &[crate::spectrum::z80dis::DisLine]) -> Vec<u8> {
     }
     w
 }
+
+// ---- audio ----------------------------------------------------------------
+
+/// A block list followed by a playback order, as the render calls send one.
+pub fn decode_blocks_and_order(buf: &[u8]) -> ReadResult<(Vec<Block>, Vec<u32>)> {
+    let mut r = Reader::new(buf);
+    let count = r.u32()? as usize;
+    let mut blocks = Vec::with_capacity(count.min(1024));
+    for _ in 0..count {
+        blocks.push(Block::new(read_block(&mut r)?));
+    }
+    let n = r.u32()? as usize;
+    let mut order = Vec::with_capacity(n.min(1 << 20));
+    for _ in 0..n {
+        order.push(r.u32()?);
+    }
+    Ok((blocks, order))
+}
+
+/// `[u32 count]` then that many doubles. T-state totals outgrow 32 bits on a
+/// long tape, and JavaScript counts in doubles anyway.
+pub fn encode_f64s(values: &[f64]) -> Vec<u8> {
+    let mut w = header();
+    u32v(&mut w, values.len());
+    for v in values {
+        w.extend_from_slice(&v.to_le_bytes());
+    }
+    w
+}
+
+/// The playback timeline: every start, then the total.
+pub fn encode_timeline(t: &crate::audio::Timeline) -> Vec<u8> {
+    let starts: Vec<f64> = t.starts.iter().map(|s| *s as f64).collect();
+    let mut w = encode_f64s(&starts);
+    w.extend_from_slice(&(t.total as f64).to_le_bytes());
+    w
+}
+
+/// A tape duration: the seconds, then the playback order it followed.
+pub fn encode_duration(seconds: f64, order: &[u32]) -> Vec<u8> {
+    let mut w = header();
+    w.extend_from_slice(&seconds.to_le_bytes());
+    u32v(&mut w, order.len());
+    for i in order {
+        u32v(&mut w, *i as usize);
+    }
+    w
+}
+
+/// `[u32 count]` then `[f64 tstates][u8 level]` per pulse.
+pub fn encode_pulses(pulses: &[(u64, u8)]) -> Vec<u8> {
+    let mut w = header();
+    u32v(&mut w, pulses.len());
+    for (t, level) in pulses {
+        w.extend_from_slice(&(*t as f64).to_le_bytes());
+        w.push(*level);
+    }
+    w
+}
+
+/// Rendered samples, as little-endian `f32`.
+pub fn encode_samples(samples: &[f32]) -> Vec<u8> {
+    let mut w = header();
+    u32v(&mut w, samples.len() * 4);
+    for s in samples {
+        w.extend_from_slice(&s.to_le_bytes());
+    }
+    w
+}

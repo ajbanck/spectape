@@ -614,3 +614,68 @@ export function decodeDisLines(buf: Uint8Array): DisLine[] {
   }
   return out;
 }
+
+// ---- audio -----------------------------------------------------------------
+
+/** A block list followed by a playback order, as the render calls send one. */
+export function encodeBlocksAndOrder(blocks: Block[], order: number[]): Uint8Array {
+  const head = encodeBlocks(blocks);
+  const tail = new Writer();
+  tail.u32(order.length);
+  for (const i of order) tail.u32(i);
+  const rest = tail.toUint8Array();
+  const out = new Uint8Array(head.length + rest.length);
+  out.set(head);
+  out.set(rest, head.length);
+  return out;
+}
+
+function f64(r: Reader, buf: Uint8Array): number {
+  const v = new DataView(buf.buffer, buf.byteOffset + r.pos, 8).getFloat64(0, true);
+  r.pos += 8;
+  return v;
+}
+
+export function decodeF64s(buf: Uint8Array): number[] {
+  const r = new Reader(buf);
+  readHeader(r);
+  const out: number[] = [];
+  for (let n = r.u32(); n > 0; n--) out.push(f64(r, buf));
+  return out;
+}
+
+export function decodeTimeline(buf: Uint8Array): { starts: number[]; total: number } {
+  const r = new Reader(buf);
+  readHeader(r);
+  const starts: number[] = [];
+  for (let n = r.u32(); n > 0; n--) starts.push(f64(r, buf));
+  return { starts, total: f64(r, buf) };
+}
+
+export function decodeDuration(buf: Uint8Array): { seconds: number; order: number[] } {
+  const r = new Reader(buf);
+  readHeader(r);
+  const seconds = f64(r, buf);
+  const order: number[] = [];
+  for (let n = r.u32(); n > 0; n--) order.push(r.u32());
+  return { seconds, order };
+}
+
+export function decodePulses(buf: Uint8Array): { tstates: number; level: 0 | 1 }[] {
+  const r = new Reader(buf);
+  readHeader(r);
+  const out: { tstates: number; level: 0 | 1 }[] = [];
+  for (let n = r.u32(); n > 0; n--) out.push({ tstates: f64(r, buf), level: r.u8() as 0 | 1 });
+  return out;
+}
+
+/** Rendered samples, which arrive as little-endian `f32`. */
+export function decodeSamples(buf: Uint8Array): Float32Array {
+  const r = new Reader(buf);
+  readHeader(r);
+  const len = r.u32();
+  // The payload is a copy already, but it may not be 4-byte aligned.
+  const start = buf.byteOffset + r.pos;
+  if (start % 4 === 0) return new Float32Array(buf.buffer, start, len / 4);
+  return new Float32Array(buf.slice(r.pos, r.pos + len).buffer);
+}

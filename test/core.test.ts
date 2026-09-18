@@ -4,6 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { deflate } from 'pako';
 import * as core from '../src/tzx/parser';
 import * as ref from './reference/parser';
 import * as coreWriter from '../src/tzx/writer';
@@ -32,6 +33,8 @@ import * as coreBasic from '../src/spectrum/basic';
 import * as refBasic from './reference/spectrum/basic';
 import { disassemble as coreDisassemble } from '../src/spectrum/z80dis';
 import { disassemble as refDisassemble } from './reference/spectrum/z80dis';
+import * as coreAudio from '../src/tzx/audio';
+import * as refAudio from './reference/audio';
 import { serializeTzx, serializeTap } from '../src/tzx/writer';
 import { Block, CREATABLE_IDS, ParsedTape, createBlock, isDataBlock } from '../src/tzx/types';
 import { encodeHeader } from '../src/tzx/describe';
@@ -769,5 +772,140 @@ describe('the Rust Spectrum side against the TypeScript it replaced', () => {
     for (const hex of [true, false]) {
       expect(coreDisassemble(calls, 0, 0x8000, 6, { hex })).toEqual(refDisassemble(calls, 0, 0x8000, 6, { hex }));
     }
+  });
+});
+
+describe('the Rust audio against the TypeScript it replaced', () => {
+  const b = (id: number, fields: Record<string, unknown> = {}) => Object.assign(createBlock(id), fields) as Block;
+
+  /** Every pulse source, plus the flow blocks that decide what plays when. */
+  function tapes(): Block[][] {
+    const data = new Uint8Array([0x00, 3, 65, 66, 67, 0x55]);
+    return [
+      [],
+      [b(0x10, { data, pause: 100 })],
+      [b(0x10, { data: new Uint8Array([0xff, 1, 2]), pause: 0 })],   // data block, no pause
+      [b(0x11, { data, pause: 50, pilotLen: 100, usedBits: 3 })],
+      [b(0x12, { count: 50 }), b(0x13, { pulses: [100, 200, 300] })],
+      [b(0x14, { data, pause: 10, usedBits: 5 })],
+      [b(0x15, { data: new Uint8Array([0b10110010, 0xff]), tstates: 79, usedBits: 4, pause: 5 })],
+      [b(0x18, { data: new Uint8Array([3, 4, 5, 0, 0x10, 0x27, 0, 0]), sampleRate: 22050, compression: 1, pause: 5 })],
+      [b(0x19, {
+        pause: 20, totp: 2, npp: 2,
+        pilotSymbols: [{ flags: 0, pulses: [2168] }, { flags: 1, pulses: [667, 735] }],
+        pilotStream: [{ symbol: 0, reps: 10 }, { symbol: 1, reps: 1 }],
+        totd: 16, npd: 2,
+        dataSymbols: [{ flags: 2, pulses: [855, 855] }, { flags: 3, pulses: [1710, 1710] }],
+        data: new Uint8Array([0xa5, 0x5a]),
+      })],
+      [b(0x2b, { level: 1 }), b(0x12, { count: 5 }), b(0x20, { pause: 1 })],
+      [b(0x24, { count: 3 }), b(0x12, { count: 2 }), b(0x25), b(0x20, { pause: 1 })],
+      [b(0x26, { offsets: [2, 3] }), b(0x20, { pause: 1 }), b(0x12, { count: 1 }), b(0x27)],
+      [b(0x23, { offset: 2 }), b(0x12, { count: 99 }), b(0x20, { pause: 1 })],
+      [b(0x2a), b(0x12, { count: 1 })],
+      [b(0x20, { pause: 0 }), b(0x12, { count: 1 })],                 // stop the tape
+      core.parseTape(sample('SpecTape demo.tzx')).blocks,
+      core.parseTape(sample('SpecTape demo (variant).tzx')).blocks,
+    ];
+  }
+
+  it('plays the blocks in the same order', () => {
+    for (const blocks of tapes()) {
+      expect(coreAudio.playbackOrder(blocks)).toEqual(refAudio.playbackOrder(blocks));
+      expect(coreAudio.playbackOrder(blocks, { stopAt48k: true })).toEqual(refAudio.playbackOrder(blocks, { stopAt48k: true }));
+    }
+  });
+
+  it('measures the same durations and timelines', () => {
+    for (const blocks of tapes()) {
+      for (const block of blocks) {
+        expect(coreAudio.blockDuration(block)).toBe(refAudio.blockDuration(block));
+      }
+      expect(coreAudio.tapeDuration(blocks)).toEqual(refAudio.tapeDuration(blocks));
+      const order = coreAudio.playbackOrder(blocks);
+      expect(coreAudio.playbackTimeline(blocks, order)).toEqual(refAudio.playbackTimeline(blocks, order));
+      for (const rate of [8000, 44100]) {
+        expect(coreAudio.renderLength(blocks, rate, order)).toBe(refAudio.renderLength(blocks, rate, order));
+      }
+    }
+  });
+
+  it('emits the same pulses for every block', () => {
+    for (const blocks of tapes()) {
+      for (const block of blocks) {
+        // The reference has no pulse list, so record one with its own sink.
+        const recorded: { tstates: number; level: 0 | 1 }[] = [];
+        let level: 0 | 1 = 0;
+        const sink: refAudio.PulseSink = {
+          get level() { return level; },
+          set level(l) { level = l; },
+          pulse(t) { recorded.push({ tstates: t, level }); level = level ? 0 : 1; },
+          hold(t) { recorded.push({ tstates: t, level }); },
+          setLevel(l) { level = l; },
+        };
+        refAudio.emitBlock(sink, block);
+        expect(coreAudio.blockPulses(block)).toEqual(recorded);
+      }
+    }
+  });
+
+  it('renders the same samples, bit for bit', () => {
+    for (const blocks of tapes()) {
+      for (const mode of ['square', 'mic'] as const) {
+        for (const sampleRate of [8000, 44100]) {
+          const got = coreAudio.renderTape(blocks, { sampleRate, mode });
+          const want = refAudio.renderTape(blocks, { sampleRate, mode });
+          expect(got.length).toBe(want.length);
+          expect(Array.from(got)).toEqual(Array.from(want));
+        }
+      }
+      // And a non-default amplitude, which scales every sample.
+      const got = coreAudio.renderTape(blocks, { sampleRate: 8000, mode: 'square', amplitude: 0.25 });
+      const want = refAudio.renderTape(blocks, { sampleRate: 8000, mode: 'square', amplitude: 0.25 });
+      expect(Array.from(got)).toEqual(Array.from(want));
+    }
+  });
+
+  it('writes the same WAV files', () => {
+    for (const blocks of tapes().slice(0, 8)) {
+      const samples = coreAudio.renderTape(blocks, { sampleRate: 8000, mode: 'square' });
+      for (const bits of [8, 16] as const) {
+        expect(Array.from(coreAudio.encodeWav(samples, 8000, bits))).toEqual(Array.from(refAudio.encodeWav(samples, 8000, bits)));
+        // Rendering straight to WAV gives the same file as doing it in two steps.
+        expect(Array.from(coreAudio.renderWav(blocks, { sampleRate: 8000, mode: 'square' }, bits)))
+          .toEqual(Array.from(refAudio.encodeWav(samples, 8000, bits)));
+      }
+    }
+    // Sample values at the edges round the way JavaScript rounds them.
+    const edge = new Float32Array([-1, -0.5, -1 / 32767, 0, 1 / 32767, 0.5, 1, 1.5, -1.5]);
+    for (const bits of [8, 16] as const) {
+      expect(Array.from(coreAudio.encodeWav(edge, 8000, bits))).toEqual(Array.from(refAudio.encodeWav(edge, 8000, bits)));
+    }
+  });
+
+  it('inflates and decodes CSW blocks the same way', () => {
+    const rle = new Uint8Array([3, 4, 0, 0x10, 0x27, 0, 0, 7]);
+    expect(coreAudio.decodeCswRle(rle)).toEqual(refAudio.decodeCswRle(rle));
+    expect(coreAudio.decodeCswRle(new Uint8Array([0, 1, 2]))).toEqual(refAudio.decodeCswRle(new Uint8Array([0, 1, 2])));
+    // A Z-RLE block is inflated on the TypeScript side and rendered identically.
+    const zlib = deflate(rle);
+    const csw = b(0x18, { data: zlib, compression: 2, sampleRate: 44100, pause: 0 });
+    expect(coreAudio.blockDuration(csw)).toBe(refAudio.blockDuration(csw));
+    expect(Array.from(coreAudio.renderTape([csw], { sampleRate: 8000, mode: 'square' })))
+      .toEqual(Array.from(refAudio.renderTape([csw], { sampleRate: 8000, mode: 'square' })));
+    // A corrupt one plays silence rather than garbage, on both sides.
+    const broken = b(0x18, { data: new Uint8Array([1, 2, 3]), compression: 2, sampleRate: 44100, pause: 0 });
+    expect(coreAudio.blockDuration(broken)).toBe(refAudio.blockDuration(broken));
+  });
+
+  it('finds the same position in the timeline', () => {
+    const blocks = core.parseTape(sample('SpecTape demo.tzx')).blocks;
+    const { starts, total } = coreAudio.playbackTimeline(blocks, coreAudio.playbackOrder(blocks));
+    for (const t of [0, 1, 250, 100000, total - 1, total, total * 2]) {
+      expect(coreAudio.positionAt(starts, t)).toBe(refAudio.positionAt(starts, t));
+    }
+    expect(coreAudio.positionAt([], 5)).toBe(refAudio.positionAt([], 5));
+    expect(coreAudio.TSTATES_PER_SEC).toBe(refAudio.TSTATES_PER_SEC);
+    expect(coreAudio.LEAD_TSTATES).toBe(refAudio.LEAD_TSTATES);
   });
 });
