@@ -8,25 +8,37 @@ use spectape_core::compare::{BlockCompareMode, TapeCompareMode};
 
 use crate::app::App;
 use crate::fmt;
+use crate::icons::{self, Icon};
 
-fn cell(ui: &mut Ui, text: String, on: bool, hover: &str, tok: &crate::theme::Tokens) -> bool {
+/// One clickable cell: the icon the web bar shows, then its text.
+fn cell(
+    ui: &mut Ui,
+    icon: Option<&Icon>,
+    text: String,
+    on: bool,
+    hover: &str,
+    tok: &crate::theme::Tokens,
+) -> bool {
     let colour = if on { tok.accent } else { tok.muted };
-    let r =
-        ui.add(egui::Label::new(RichText::new(text).size(11.0).color(colour)).sense(egui::Sense::click()));
-    r.on_hover_text(hover).clicked()
+    let mut clicked = false;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        if let Some(icon) = icon {
+            clicked |= icons::inline(ui, icon, colour, 13.0).on_hover_text(hover).clicked();
+        }
+        let label =
+            egui::Label::new(RichText::new(text).size(11.0).color(colour)).sense(egui::Sense::click());
+        clicked |= ui.add(label).on_hover_text(hover).clicked();
+    });
+    clicked
 }
 
 pub fn show(app: &mut App, ui: &mut Ui) {
     let tok = app.tokens;
     ui.horizontal(|ui| {
         let hex = app.store.hex;
-        if cell(
-            ui,
-            format!("# {}", if hex { "Hex" } else { "Dec" }),
-            hex,
-            "Number base for all numbers",
-            &tok,
-        ) {
+        let base = if hex { "Hex" } else { "Dec" };
+        if cell(ui, Some(&icons::HASH), base.into(), hex, "Number base for all numbers", &tok) {
             app.store.hex = !hex;
             app.store.touch_view();
         }
@@ -38,7 +50,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             BlockCompareMode::DataTimings => "data + timings",
             BlockCompareMode::DataTimingsPauses => "data + timings + pauses",
         };
-        if cell(ui, format!("Block compare {bc_label}"), false, "How two blocks are compared", &tok) {
+        if cell(ui, None, format!("Block compare {bc_label}"), false, "How two blocks are compared", &tok) {
             app.store.block_compare = match bc {
                 BlockCompareMode::Data => BlockCompareMode::DataTimings,
                 BlockCompareMode::DataTimings => BlockCompareMode::DataTimingsPauses,
@@ -53,8 +65,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             TapeCompareMode::IgnoreMetadata => "ignore metadata",
             TapeCompareMode::All => "all blocks",
         };
-        if cell(ui, format!("Tape compare {tc_label}"), false, "Which blocks take part in tape compare", &tok)
-        {
+        let hover = "Which blocks take part in tape compare";
+        if cell(ui, Some(&icons::COMPARE), format!("Tape compare {tc_label}"), false, hover, &tok) {
             app.store.tape_compare = match tc {
                 TapeCompareMode::DataBlocks => TapeCompareMode::IgnoreMetadata,
                 TapeCompareMode::IgnoreMetadata => TapeCompareMode::All,
@@ -66,25 +78,28 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         let locked = app.store.locked;
         let hover =
             if locked { "Locked: click to allow editing" } else { "Unlocked: click to prevent edits" };
-        if cell(ui, if locked { "🔒 Locked".into() } else { "Unlocked".to_string() }, locked, hover, &tok) {
+        let icon = if locked { &icons::LOCK } else { &icons::UNLOCK };
+        let text = if locked { "Locked" } else { "Unlocked" };
+        if cell(ui, Some(icon), text.into(), locked, hover, &tok) {
             app.store.toggle_lock();
         }
         ui.separator();
 
         let mic = app.store.audio_mic;
         let label = if mic { "MIC emulation" } else { "Square wave" };
-        if cell(ui, format!("〜 {label}"), false, "Waveform used for playback and WAV export", &tok) {
+        let hover = "Waveform used for playback and WAV export";
+        if cell(ui, Some(&icons::WAVE), label.into(), false, hover, &tok) {
             app.store.audio_mic = !mic;
         }
         ui.separator();
 
         let theme = app.store.settings.theme;
-        let mark = match theme {
-            crate::settings::Theme::Light => "☀",
-            crate::settings::Theme::Dark => "☾",
-            crate::settings::Theme::System => "◐",
+        let icon = match theme {
+            crate::settings::Theme::Light => &icons::SUN,
+            crate::settings::Theme::Dark => &icons::MOON,
+            crate::settings::Theme::System => &icons::MONITOR,
         };
-        if cell(ui, format!("{mark} {}", theme.name()), false, "Theme (click to change)", &tok) {
+        if cell(ui, Some(icon), theme.name().into(), false, "Theme (click to change)", &tok) {
             app.store.settings.theme = theme.next();
             app.store.settings.save();
         }
@@ -103,7 +118,7 @@ fn progress(app: &mut App, ui: &mut Ui) {
     let tok = app.tokens;
     let p = app.progress;
     let zero = app.store.settings.zero_based;
-    ui.label(RichText::new("▶").size(11.0).color(tok.ok));
+    icons::inline(ui, &icons::PLAY, tok.ok, 11.0);
     ui.label(
         RichText::new(format!("{} / {}", fmt::time(p.elapsed), fmt::time(p.total))).size(11.0).monospace(),
     );

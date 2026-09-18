@@ -144,7 +144,7 @@ pub fn draw(app: &mut App, ctx: &egui::Context) {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(&title).size(14.0).strong());
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.small_button("✕").clicked() {
+                    if crate::icons::button(ui, &crate::icons::X, "Close", true).clicked() {
                         outcome = Outcome::Close;
                     }
                 });

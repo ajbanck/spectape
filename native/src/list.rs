@@ -22,6 +22,7 @@ use spectape_core::types::{block_name, Block, Body};
 use crate::app::{App, Drag};
 use crate::commands;
 use crate::fmt;
+use crate::icons;
 use crate::state::{Mark, SelectMode, Side};
 use crate::theme::Tokens;
 
@@ -421,13 +422,9 @@ fn draw_row(app: &App, p: &egui::Painter, ui: &mut Ui, rect: Rect, side: Side, i
     let mut left = rect.left() + 94.0 + row.depth as f32 * 12.0;
     let collapsed = t.collapsed.contains(&b.uid) && row.range_end.is_some();
     if row.range_end.is_some() {
-        p.text(
-            pos2(left, y),
-            Align2::LEFT_CENTER,
-            if collapsed { "▸" } else { "▾" },
-            FontId::proportional(11.0),
-            tok.muted,
-        );
+        let caret = if collapsed { &icons::CARET_RIGHT } else { &icons::CARET_DOWN };
+        let box_ = Rect::from_center_size(pos2(left + 5.0, y), vec2(11.0, 11.0));
+        icons::paint(p, box_, caret, tok.muted);
     }
     left += 14.0;
 

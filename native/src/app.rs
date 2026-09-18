@@ -18,6 +18,7 @@ use crate::commands;
 use crate::datawin::DataWin;
 use crate::editor::EditorState;
 use crate::fmt;
+use crate::icons;
 use crate::list::{self, RowCache};
 use crate::menu::Menu;
 use crate::menutable;
@@ -403,7 +404,7 @@ impl App {
             ui.label(RichText::new(if side == 0 { "L" } else { "R" }).size(10.0).color(tok.faint));
             ui.label(RichText::new(&t.name).size(13.0).strong());
             if t.dirty() {
-                ui.label(RichText::new("●").size(10.0).color(tok.accent)).on_hover_text("Unsaved changes");
+                icons::inline(ui, &icons::DOT, tok.accent, 8.0).on_hover_text("Unsaved changes");
             }
             if !t.blocks.is_empty() {
                 let v = required_version(&t.blocks);
@@ -412,27 +413,33 @@ impl App {
                 )
                 .on_hover_text("TZX version this tape will be saved as");
             }
+            // Right to left, so the order here is the reverse of the web
+            // toolbar's: folder, save, insert, play, programs, info.
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let has = !self.store.tape(side).blocks.is_empty();
-                if ui.small_button("ℹ").on_hover_text("Tape info…").clicked() && has {
+                if icons::button(ui, &icons::INFO, "Tape info…", has).clicked() {
                     run = Some("tape-info");
                 }
-                if ui.small_button("☰").on_hover_text("Programs…").clicked() && has {
+                if icons::button(ui, &icons::LIST, "Programs…", has).clicked() {
                     run = Some("programs");
                 }
                 let playing = self.player.playing();
-                let label = if playing { "■" } else { "▶" };
-                let hover = if playing { "Stop playback" } else { "Play from cursor" };
-                if ui.small_button(label).on_hover_text(hover).clicked() && has {
+                let (icon, hover) = if playing {
+                    (&icons::STOP, "Stop playback")
+                } else {
+                    (&icons::PLAY, "Play from cursor")
+                };
+                if icons::button(ui, icon, hover, has).clicked() {
                     run = Some(if playing { "stop" } else { "play-cursor" });
                 }
-                if ui.small_button("＋").on_hover_text("Insert block…").clicked() {
+                if icons::button(ui, &icons::PLUS, "Insert block…", true).clicked() {
                     run = Some("insert");
                 }
-                if ui.small_button("💾").on_hover_text("Save").clicked() && has {
+                let save_hover = if self.store.tape(side).path.is_some() { "Save" } else { "Save as TZX" };
+                if icons::button(ui, &icons::SAVE, save_hover, has).clicked() {
                     run = Some("save");
                 }
-                if ui.small_button("📂").on_hover_text("Open tape…").clicked() {
+                if icons::button(ui, &icons::FOLDER, "Open tape…", true).clicked() {
                     run = Some("open");
                 }
             });

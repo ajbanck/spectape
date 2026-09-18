@@ -133,6 +133,26 @@ impl Tokens {
     }
 }
 
+/// egui's default font list minus the two emoji fonts.
+///
+/// Nothing the app draws needs them any more — the icons are geometry, and
+/// `src/icons.rs` says why — with one exception: on macOS the shortcut labels
+/// spell modifiers as ⌘⇧⌥⌃⌫, and those glyphs live in the emoji fonts.
+///
+/// Kept because `--measure` weighs it, and the answer is worth keeping visible:
+/// about 1 ms of a 4–6 ms first frame. egui rasterises glyphs on demand, so the
+/// fonts it never draws from cost almost nothing. Whatever cold start turns out
+/// to be, it is not this.
+pub fn latin_only_fonts() -> egui::FontDefinitions {
+    let mut fonts = egui::FontDefinitions::default();
+    let keep = ["Hack", "Ubuntu-Light"];
+    fonts.font_data.retain(|name, _| keep.contains(&name.as_str()));
+    for family in fonts.families.values_mut() {
+        family.retain(|name| keep.contains(&name.as_str()));
+    }
+    fonts
+}
+
 /// The tokens for the chosen theme; `System` follows what egui was told about
 /// the desktop's preference.
 pub fn tokens(theme: crate::settings::Theme, system_dark: bool) -> Tokens {

@@ -13,7 +13,8 @@
 //! size the plan measures rendering with), `--bench` moves the cursor once per
 //! frame N times and reports the distribution, `--exit-on-draw` quits on the
 //! first frame, so `time spectape-native …` is the cold start, and `--measure`
-//! prints what the core costs in process and opens no window at all.
+//! prints what the core costs in process, plus what the app's own first frame
+//! costs — all of it without opening a window.
 
 #![windows_subsystem = "windows"]
 
@@ -26,6 +27,7 @@ mod editor;
 mod emulator;
 mod files;
 mod fmt;
+mod icons;
 mod list;
 mod menu;
 mod menutable;
@@ -152,6 +154,41 @@ fn measure(blocks: &[Block], parse_ms: f64, hex: bool) {
     debug_assert!(sink > 0);
 }
 
+/// What the app's own first frame costs before a window is involved: laying out
+/// and tessellating every panel, and rasterising the glyphs it uses. This is the
+/// half of cold start that can be measured from a terminal — the other half is
+/// process start, window creation and the GL context, and it needs a screen.
+///
+/// The two font sets are timed against each other because trimming them was the
+/// obvious suspect for a slow start. It is not: the gap is about a millisecond.
+fn measure_first_frame(store: Store) {
+    let mut store = Some(store);
+    println!("\nfirst headless frame (no window, no GL context, warm page cache):");
+    for (label, fonts) in
+        [("egui's default fonts", None), ("without the emoji fonts", Some(theme::latin_only_fonts()))]
+    {
+        let ctx = egui::Context::default();
+        if let Some(fonts) = fonts {
+            ctx.set_fonts(fonts);
+        }
+        // A fresh store per run: the second frame would find the rows cached.
+        let taken = store.take().unwrap();
+        let name = taken.tape(0).name.clone();
+        let blocks = taken.tape(0).blocks.clone();
+        let mut next = Store::new(Settings::default());
+        next.tape_mut(0).load(name, None, blocks, None);
+        let mut app = app::App::build(&ctx, menu::Menu::headless(), taken, Instant::now(), 0, false);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0))),
+            ..Default::default()
+        };
+        let t = Instant::now();
+        ctx.run_ui(input, |ui| app.frame(ui)).drop_without_applying_deltas();
+        println!("  {label:<24} {:7.2} ms", t.elapsed().as_secs_f64() * 1000.0);
+        store = Some(next);
+    }
+}
+
 fn main() -> eframe::Result<()> {
     let t0 = Instant::now();
     let opts = parse_args();
@@ -180,6 +217,7 @@ fn main() -> eframe::Result<()> {
 
     if opts.measure {
         measure(&store.tape(0).blocks, parse_ms, opts.hex);
+        measure_first_frame(store);
         return Ok(());
     }
 

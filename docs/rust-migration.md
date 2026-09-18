@@ -562,7 +562,21 @@ Four things worth knowing:
    counter for the display options. A cursor move rebuilds nothing; changing the Dec/Hex switch
    rebuilds both panes. This is the in-process version of the two caching rules stage 2 measured.
 
-**What the tests cover.** `npm run native:test` is 54 tests:
+**The icons are geometry, not glyphs.** The toolbar and status bar first went in as emoji (📂 💾 🔒
+☀), which is a font dependency wearing a different hat: the glyph differs per platform and per font
+set. `src/icons.rs` is the port of `src/ui/icons.tsx` — the same 24×24 stroke paths as polylines,
+circles and arcs, painted by egui, with a test that paints every one at every size the app uses.
+
+The reason for doing it first was a guess that trimming egui's font list would be the cold-start
+lever. **It is not**, and `--measure` now says so out loud: the app's whole first frame is 4–6 ms
+headless, and dropping both emoji fonts saves about 1 ms of it. egui rasterises glyphs on demand,
+so fonts it never draws from cost almost nothing. Whatever cold start turns out to be, it is
+process start, window creation and the GL context — not egui, not the fonts, and not the core,
+which parses the demo tape in 0.7 ms. The trim is kept as `theme::latin_only_fonts()` for the
+measurement and for the platforms that spell shortcuts "Ctrl+S"; macOS needs those fonts for the
+⌘⇧⌥⌃⌫ in the shortcut list.
+
+**What the tests cover.** `npm run native:test` is 57 tests:
 
 - `tests/menu.rs` reads `src/state/commands.ts` and checks the table against it — every id present
   in both, no duplicates, and now **the enabled rule of every command**, parsed from the web's own
@@ -573,6 +587,7 @@ Four things worth knowing:
 - `src/commands.rs` runs **every command id** that does not reach outside the process and fails if
   one has no arm; plus the option toggles, a disabled command doing nothing, and the Edit commands
   going to a focused field.
+- `src/icons.rs` paints every icon at every size the app uses, through egui's real tessellator.
 - `src/list.rs` tests the list itself: what a collapsed group hides, where a drop lands next to
   one, the drop the web ignores, and that the rows carry the indent, the range and the block
   numbering the options ask for.
@@ -587,8 +602,11 @@ stage 5's packaging work touches anyway:
 - **The two numbers.** Cold start and a 3,000-row cursor move still have to be read off a running
   window; `npm run native` prints both commands. The boundary numbers this stage could take from a
   terminal are unchanged from stage 3 (0.67 ms to describe 3,000 blocks, 0.17 ms for the content
-  labels, 0.63 ms to serialize). Binary size is **6.1 MB** stripped, arm64 only, up from the
-  skeleton's 5.2 MB with rfd, cpal, zlib, png and arboard added.
+  labels, 0.63 ms to serialize), and the first frame costs 4–6 ms of them. Binary size is **6.1 MB**
+  stripped, arm64 only, up from the skeleton's 5.2 MB with rfd, cpal, zlib, png and arboard added.
+  So if cold start comes back high, none of the candidates are in this repo: look at dyld, at
+  NSApplication and window creation, and at whether an unsigned bundle is paying a Gatekeeper toll
+  on its first run.
 - **File associations.** The bundle now declares TZX and TAP as document types, and a tape named on
   the command line opens (a second one goes into the right pane, the way `?open=&right=` does on
   the web). What is not wired is the Apple Event macOS sends when you double-click a document while
