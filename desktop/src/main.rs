@@ -7,14 +7,10 @@
 //! filled the app in against the parity checklist there, and stage 5 made it the
 //! desktop app: the Tauri shell is gone, `src/` is the browser build.
 //!
-//!     spectape [TAPE…] [--rows N] [--bench N] [--exit-on-draw] [--measure] [--hex]
-//!
-//! `--rows` repeats the tape's blocks until the list is N rows long (3,000 is the
-//! size the plan measures rendering with), `--bench` moves the cursor once per
-//! frame N times and reports the distribution, `--exit-on-draw` quits on the
-//! first frame, so `time spectape …` is the cold start, and `--measure`
-//! prints what the core costs in process, plus what the app's own first frame
-//! costs — all of it without opening a window.
+//! The flags are in `HELP` below, which is what `--help` prints — one list, so it
+//! cannot drift from the arguments `parse_args` accepts the way it did before
+//! `--screenshot` existed. `--screenshot` and `--measure` are the two that open no
+//! window, which is what makes them the way to check a change from a terminal.
 
 #![windows_subsystem = "windows"]
 
@@ -60,6 +56,27 @@ const DEFAULT_TAPE: &str = "public/samples/SpecTape demo.tzx";
 /// and a task bar want.
 const ICON_PNG: &[u8] = include_bytes!("../../assets/icons/128x128.png");
 
+/// `--help`. The flags below the first group open no window, which is what makes
+/// them the way to check a change from a terminal; `--screenshot` is the one the
+/// tests use too, through `shot::capture`.
+const HELP: &str = "\
+spectape [TAPE…] [OPTIONS]
+
+  A tape named here opens in the left pane, a second one in the right.
+
+  --hex                  start with numbers in hexadecimal
+  --screenshot F[,WxH]   draw the app into a PNG and quit — no window, no GPU
+  --theme NAME           light, dark or system (default: system)
+  --cursor N             put the cursor on row N first
+  --measure              time the core in process and the app's own first frame
+  --rows N               repeat the tape's blocks until the list is N rows long
+  --bench N              move the cursor once per frame N times, report the spread
+  --exit-on-draw         quit on the first frame, so `time spectape …` is the cold start
+  -h, --help             this
+
+  --measure and --screenshot write to the terminal or to a file and quit;
+  every other way of starting opens a window.";
+
 struct Opts {
     paths: Vec<PathBuf>,
     rows: Option<usize>,
@@ -99,7 +116,7 @@ fn parse_args() -> Opts {
             "--cursor" => o.cursor = args.next().and_then(|v| v.parse().ok()),
             "--theme" => o.theme = args.next(),
             "-h" | "--help" => {
-                println!("spectape [TAPE…] [--rows N] [--bench N] [--exit-on-draw] [--measure] [--hex]");
+                println!("{HELP}");
                 std::process::exit(0);
             }
             // macOS hands a bundled app a process serial number argument.
