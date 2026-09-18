@@ -117,11 +117,15 @@ enum Outcome {
     Close,
 }
 
+/// The ✕ in the title row, under an id of its own so a test can click it.
+pub fn close_button_id() -> egui::Id {
+    egui::Id::new("spectape-dialog-close")
+}
+
 /// Draw the open dialog, if any.
 pub fn draw(app: &mut App, ctx: &egui::Context) {
     let Some(mut dialog) = app.store.dialog.take() else { return };
     let tok = app.tokens;
-    let mut outcome = Outcome::Keep;
     let (title, width) = match &dialog {
         Dialog::Message { title, .. } | Dialog::Confirm { title, .. } => (title.clone(), 460.0),
         Dialog::About => ("About SpecTape".into(), 460.0),
@@ -141,16 +145,18 @@ pub fn draw(app: &mut App, ctx: &egui::Context) {
         )
         .show(ctx, |ui| {
             ui.set_width(width);
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(&title).size(14.0).strong());
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if crate::icons::button(ui, &crate::icons::X, "Close", true).clicked() {
-                        outcome = Outcome::Close;
-                    }
-                });
-            });
+            let closed = ui
+                .horizontal(|ui| {
+                    ui.label(RichText::new(&title).size(14.0).strong());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let x = &crate::icons::X;
+                        crate::icons::button_with_id(ui, close_button_id(), x, "Close", true).clicked()
+                    })
+                    .inner
+                })
+                .inner;
             ui.add_space(6.0);
-            outcome = match &mut dialog {
+            let body = match &mut dialog {
                 Dialog::Message { lines, .. } => lines_with_ok(ui, lines),
                 Dialog::Confirm { lines, then, .. } => confirm_body(ui, app, lines, then.clone()),
                 Dialog::About => about_body(ui, &tok),
@@ -161,11 +167,18 @@ pub fn draw(app: &mut App, ctx: &egui::Context) {
                 Dialog::Programs(s) => programs_body(ui, app, s, &tok),
                 Dialog::Emulator(s) => emulator_body(ui, app, s, &tok),
             };
+            // The ✕ wins over the body, which reports `Keep` on every frame in
+            // which nothing was clicked in it. Assigning both to one variable is
+            // what made the ✕ do nothing at all.
+            if closed {
+                Outcome::Close
+            } else {
+                body
+            }
         });
 
-    if response.should_close() || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-        outcome = Outcome::Close;
-    }
+    let dismissed = response.should_close() || ctx.input(|i| i.key_pressed(egui::Key::Escape));
+    let outcome = if dismissed { Outcome::Close } else { response.inner };
     if matches!(outcome, Outcome::Keep) {
         app.store.dialog = Some(dialog);
     }

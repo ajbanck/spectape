@@ -713,6 +713,63 @@ mod tests {
         draw(&ctx, &mut app);
     }
 
+    /// Click where a widget was drawn, over two frames: egui sees the press in
+    /// one and the release in the next, which is what makes a click.
+    fn click(ctx: &egui::Context, app: &mut App, at: egui::Pos2) {
+        for pressed in [true, false] {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(1200.0, 800.0))),
+                events: vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| app.frame(ui)).drop_without_applying_deltas();
+        }
+    }
+
+    /// Where a widget ends up once the layout stops moving: a modal centres
+    /// itself on the size it measured the frame before, so the first frame after
+    /// a dialog opens draws it somewhere it will not stay.
+    fn settled(ctx: &egui::Context, app: &mut App, id: egui::Id) -> Rect {
+        // The first frames of a new dialog are drawn where the *previous* one
+        // sat, because a modal reuses the position it remembers until it has
+        // measured this content, so a couple of frames go by before comparing.
+        let mut last = None;
+        for _ in 0..3 {
+            draw(ctx, app);
+        }
+        for _ in 0..8 {
+            draw(ctx, app);
+            let rect = ctx.read_response(id).expect("the widget was drawn").rect;
+            if last == Some(rect) {
+                return rect;
+            }
+            last = Some(rect);
+        }
+        panic!("the layout never settled");
+    }
+
+    /// The ✕ in a dialog's title row, clicked. Every dialog is drawn by the same
+    /// frame, so About stands for all of them — and About is where the ✕ was
+    /// found to do nothing, because the body's answer overwrote it.
+    #[test]
+    fn the_close_control_closes_a_dialog() {
+        let (ctx, mut app) = app_with(every_block());
+        for dialog in [Dialog::about(), Dialog::tape_info(0), Dialog::message("Hello", vec!["one".into()])] {
+            app.store.dialog = Some(dialog);
+            let x = settled(&ctx, &mut app, crate::dialogs::close_button_id());
+            click(&ctx, &mut app, x.center());
+            assert!(app.store.dialog.is_none(), "the dialog stayed open after its ✕ was clicked");
+        }
+    }
+
     /// The menu bar egui draws when the platform does not take one — Linux, and
     /// Windows if a window ever refuses muda's. It is drawn here whatever the
     /// platform, so the path is not left to a machine nobody is testing on.

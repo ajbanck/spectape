@@ -213,8 +213,15 @@ pub fn paint(painter: &egui::Painter, rect: Rect, icon: &Icon, colour: Color32) 
 /// button carries as its `title`. A disabled one is dimmed and cannot be
 /// clicked, but still says what it would have done.
 pub fn button(ui: &mut Ui, icon: &Icon, hover: &str, enabled: bool) -> Response {
+    button_with_id(ui, ui.next_auto_id(), icon, hover, enabled)
+}
+
+/// The same button under an id of its own, so something that is not a pointer —
+/// a headless test — can find it and click it.
+pub fn button_with_id(ui: &mut Ui, id: egui::Id, icon: &Icon, hover: &str, enabled: bool) -> Response {
     let sense = if enabled { Sense::click() } else { Sense::hover() };
-    let (rect, response) = ui.allocate_exact_size(vec2(24.0, 20.0), sense);
+    let rect = ui.allocate_exact_size(vec2(24.0, 20.0), Sense::hover()).0;
+    let response = ui.interact(rect, id, sense);
     let visuals = ui.visuals();
     let colour = if !enabled {
         visuals.weak_text_color()
