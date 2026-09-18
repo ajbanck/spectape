@@ -35,6 +35,7 @@ mod menu;
 mod menutable;
 mod player;
 mod settings;
+mod shot;
 mod state;
 mod statusbar;
 mod tables;
@@ -65,11 +66,23 @@ struct Opts {
     exit_on_draw: bool,
     measure: bool,
     hex: bool,
+    /// `--screenshot FILE[,WxH]`: draw the app into a PNG and quit, no window.
+    screenshot: Option<String>,
+    /// Which row the screenshot has the cursor on.
+    cursor: Option<i32>,
 }
 
 fn parse_args() -> Opts {
-    let mut o =
-        Opts { paths: Vec::new(), rows: None, bench: None, exit_on_draw: false, measure: false, hex: false };
+    let mut o = Opts {
+        paths: Vec::new(),
+        rows: None,
+        bench: None,
+        exit_on_draw: false,
+        measure: false,
+        hex: false,
+        screenshot: None,
+        cursor: None,
+    };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -78,6 +91,8 @@ fn parse_args() -> Opts {
             "--exit-on-draw" => o.exit_on_draw = true,
             "--measure" => o.measure = true,
             "--hex" => o.hex = true,
+            "--screenshot" => o.screenshot = args.next(),
+            "--cursor" => o.cursor = args.next().and_then(|v| v.parse().ok()),
             "-h" | "--help" => {
                 println!("spectape [TAPE…] [--rows N] [--bench N] [--exit-on-draw] [--measure] [--hex]");
                 std::process::exit(0);
@@ -248,6 +263,27 @@ fn main() -> eframe::Result<()> {
         store.tape_mut(0).load(name, None, grown, None);
     }
 
+    // A picture of the app, without a window: what `npm run smoke` gives the
+    // browser build. `--screenshot out.png` or `--screenshot out.png,1400x900`.
+    if let Some(spec) = opts.screenshot.clone() {
+        let (path, size) = match spec.split_once(',') {
+            Some((p, wh)) => {
+                let (w, h) = wh.split_once('x').unwrap_or(("1100", "720"));
+                (p.to_string(), (w.parse().unwrap_or(1100.0), h.parse().unwrap_or(720.0)))
+            }
+            None => (spec, (1100.0, 720.0)),
+        };
+        if let Some(at) = opts.cursor {
+            store.set_cursor(0, at, state::SelectMode::Single);
+        }
+        let ctx = egui::Context::default();
+        let mut app = app::App::build(&ctx, menu::Menu::headless(), store, t0, 0, false);
+        let canvas = shot::capture(&ctx, &mut app, size, 3);
+        std::fs::write(&path, canvas.to_png()).expect("write the screenshot");
+        println!("{path}: {}×{}", canvas.width, canvas.height);
+        return Ok(());
+    }
+
     if opts.measure {
         measure(&store.tape(0).blocks, parse_ms, opts.hex);
         measure_first_frame(store);
@@ -288,7 +324,16 @@ mod tests {
     use super::*;
 
     fn opts() -> Opts {
-        Opts { paths: Vec::new(), rows: None, bench: None, exit_on_draw: false, measure: false, hex: false }
+        Opts {
+            paths: Vec::new(),
+            rows: None,
+            bench: None,
+            exit_on_draw: false,
+            measure: false,
+            hex: false,
+            screenshot: None,
+            cursor: None,
+        }
     }
 
     /// Started with nothing to open, the app opens nothing: the demo tape is for

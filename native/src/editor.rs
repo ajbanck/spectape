@@ -29,6 +29,14 @@ use crate::widgets as w;
 
 const TSTATES_PER_SEC: f64 = 3_500_000.0;
 
+/// A row that puts what does not fit on the next line instead of clipping it —
+/// what `flex-wrap` does in the web editor. egui clips overflow and shows no
+/// scrollbar, so in a narrow pane the screen thumbnail was simply swallowed:
+/// half an image against the pane edge, or nothing at all.
+fn wrapping_row<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP).with_main_wrap(true), add).inner
+}
+
 /// A rendered screen preview, kept until the bytes behind it change.
 struct Preview {
     key: u64,
@@ -107,7 +115,8 @@ pub fn show(app: &mut App, ui: &mut Ui, side: Side, height: f32) {
 
     ui.set_min_height(height);
     ui.vertical(|ui| {
-        // ---- type row
+        // ---- type row. Not a wrapping row: a row of small inline widgets wraps
+        // into a scattered column, and the note at the end is a hint, not content.
         ui.horizontal(|ui| {
             ui.label(RichText::new("Block type").size(12.0).color(tok.muted));
             let unknown = draft.is_unknown();
@@ -245,7 +254,7 @@ impl Form<'_> {
         }
         match id {
             0x10 => {
-                ui.horizontal_top(|ui| {
+                wrapping_row(ui, |ui| {
                     let header = matches!(self.draft.data(), Some(d) if d.first().is_some_and(|f| *f < 128));
                     let pilot = if header { 8063 } else { 3223 };
                     ui.vertical(|ui| {
@@ -262,7 +271,7 @@ impl Form<'_> {
                 self.header_editor(ui);
             }
             0x11 => {
-                ui.horizontal_top(|ui| {
+                wrapping_row(ui, |ui| {
                     ui.vertical(|ui| {
                         let hex = self.hex;
                         let dis = self.disabled;
@@ -317,7 +326,7 @@ impl Form<'_> {
                 self.header_editor(ui);
             }
             0x14 => {
-                ui.horizontal_top(|ui| {
+                wrapping_row(ui, |ui| {
                     ui.vertical(|ui| {
                         let (hex, dis) = (self.hex, self.disabled);
                         if let Body::PureData { zero, one, used_bits, .. } = self.draft {
@@ -348,7 +357,7 @@ impl Form<'_> {
             }
             0x13 => self.pulse_list(ui),
             0x15 => {
-                ui.horizontal_top(|ui| {
+                wrapping_row(ui, |ui| {
                     ui.vertical(|ui| {
                         let (hex, dis, tok) = (self.hex, self.disabled, self.tok);
                         if let Body::Direct { tstates, used_bits, data, .. } = self.draft {
@@ -831,7 +840,7 @@ impl Form<'_> {
             ),
             _ => (String::new(), String::new(), String::new()),
         };
-        ui.horizontal_top(|ui| {
+        wrapping_row(ui, |ui| {
             ui.vertical(|ui| {
                 ui.set_max_width(ui.available_width() * 0.55);
                 w::note(ui, &tok, "Pilot/sync symbol table — [code]: flags; pulse1, pulse2, …");
