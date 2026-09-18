@@ -140,7 +140,7 @@ Four things worth knowing before stage 2:
    wasm32 target; it is only missing from `PATH`, where Homebrew's cargo (host target only) wins.
    `scripts/build-wasm.mjs` prefers the rustup shim, and both CI workflows now install the target.
 
-## Stage 2 — The rest of the logic (1–2 days) — **in progress**
+## Stage 2 — The rest of the logic (1–2 days) — **done**
 
 Same pattern, module by module, each with its tests ported and running against both
 implementations before the TypeScript goes away:
@@ -268,7 +268,7 @@ The remaining cost is the first call after a tape changes: on a 3,000-block, 1.2
 about 40 ms of encoding spread over the list, the checks and the program list. The real answer is
 stage 4, where the tape stops crossing the boundary because it lives in Rust.
 
-## Stage 3 — Native shell skeleton (half a day)
+## Stage 3 — Native shell skeleton (half a day) — **done, gate answered: egui**
 
 A second binary, `spectape-native`, linking `core/` directly (no wasm). Window, native menu built
 from the same command table, and a read-only block list showing a loaded tape.
@@ -277,6 +277,117 @@ Not shipped. Developed alongside the real app.
 
 **Gate — this is the decision point.** Does the Slint list handle 3,000 rows smoothly? Does the
 menu feel right on all three platforms? If not, swap to egui or Qt here, having lost an afternoon. Measure cold start now: it should be near 100 ms, or the premise is wrong.
+
+### What stage 3 built
+
+Done on 2026-09-18. `native/` is a **Slint 1.18** binary crate that links `spectape-core` as an
+rlib: no wasm, no wire format, no web view. `npm run native` builds it and wraps it in a minimal
+`SpecTape Native.app`, and prints how to run it and the three measuring commands. It is 1,066 lines
+of Rust and Slint in total:
+
+| | |
+|---|---|
+| `native/src/menutable.rs` | the command table: id, label, shortcut, when it is enabled |
+| `native/build.rs` | includes that table and writes the `MenuBar { … }` markup into `ui/app.slint` |
+| `native/ui/app.slint` | the window: tape header, block list, status bar, key handling |
+| `native/src/main.rs` | loads a tape, builds the rows from the core, wires the menu, measures |
+| `native/tests/menu.rs` | the menu against `src/state/commands.ts`: 4 tests, `npm run native:test` |
+
+The list shows what the web one shows, out of the same core calls the app's TypeScript reaches
+through `src/tzx/core.ts`: `parser::parse_tape`, `describe::describe_block` and `block_length`,
+`content::content_labels`, the group/loop indent, and `consistency` and `programs` in the status
+line. Three menu commands are live, the three that only read the tape — Tape Info, Programs and
+Check Consistency report into the status bar; every other item reports its id there instead.
+
+Four decisions worth keeping:
+
+1. **`native/` is its own crate, not a workspace member with `core/`.** Cargo takes profiles from
+   the workspace root only, and `core/Cargo.toml` owns the size-first profile (`opt-level = "z"`,
+   LTO, `panic = "abort"`) that keeps the wasm module at 249 kB. A workspace would have silently
+   ignored it. A path dependency costs nothing and keeps the two builds independent.
+2. **The menu is generated, not written twice.** Slint's `MenuBar` has to be static markup inside
+   the `Window` — it cannot be a component, and the dynamic menu interface (`MenuVTable`) is
+   internal to `i-slint-core` — so `build.rs` writes the markup from `menutable.rs` and addresses
+   each item by its flat index. Labels, shortcuts and enabled rules therefore still live in one
+   Rust table, `enabled` is bound to a model the Rust side updates, and the tests fail if an id
+   drifts from `commands.ts`.
+3. **`@keys(Control + …)` is exactly SpecTape's `Mod`**: Slint maps `Control` to ⌘ on macOS and to
+   Ctrl elsewhere, so one table gives both platforms the right accelerator. On macOS the menu is
+   the real menu bar (Slint uses muda), and it adds the About/Services/Hide/Quit app menu itself —
+   which is why the app needs a bundle: unbundled, that menu is named after the executable.
+4. **The perf harness is in the binary.** `--measure` prints what the core costs in process and
+   opens no window; `--exit-on-draw` quits on the first frame, so `time …` is the cold start;
+   `--bench N` moves the cursor N times as fast as frames arrive and reports the distribution;
+   `--rows N` repeats the sample tape's blocks to N rows.
+
+### The three numbers
+
+**The boundary is gone.** The same calls as the stage 2 table, on a 3,000-block, 1.2 MB tape (the
+demo tape's blocks repeated), release build, in process:
+
+| | TypeScript | wasm core, cold | native, in process |
+|---|---|---|---|
+| `describeBlock` + `blockLength` × 3000 | 1.9 ms | 14.7 ms | **0.9 ms** |
+| content labels for the list | 0.8 ms | 7.4 ms | **0.2 ms** |
+| `checkConsistency` | 1.9 ms | 9.5 ms | **0.2 ms** |
+| `detectPrograms` | 0.6 ms | 8.3 ms | **0.1 ms** |
+| `groupRanges` | 0.1 ms | 1.5 ms | **0.01 ms** |
+| `requiredVersion` | 0.1 ms | 1.6 ms | **0.03 ms** |
+| `serializeTzx` | 4.7 ms | 7.4 ms | **0.6 ms** |
+
+So the ~40 ms the web app pays on the first look at a changed tape becomes about 1.5 ms, with no
+caching needed at all. That is the part of the gate a terminal can answer, and it passed.
+
+**Binary size: 11.2 MB**, stripped, arm64 only, against the 15–25 MB the plan assumed and today's
+3.6 MB app plus a system webview. Nothing has been trimmed yet (no `wasm-opt` equivalent, femtovg
+rather than the software renderer, no `panic = "abort"`), so this is an upper bound.
+
+**Cold start and the 3,000-row cursor move need the app on screen**, which is the person's part of
+this loop:
+
+| | baseline | native |
+|---|---|---|
+| Cold start to a drawn window | 355 ms | _to be measured: `time … --exit-on-draw`_ |
+| Cursor move, 3,000-block list | 76–90 ms | _to be measured: `… --rows 3000 --bench 200`_ |
+
+Both commands print their number and quit; `--bench` also prints min, median and max, and the
+status bar shows the last move's key-to-frame time while the window is open.
+
+### The gate answer: egui, not Slint
+
+The gate asked two things — does the list handle 3,000 rows, and does the menu feel right — and
+the honest outcome is that it was settled on neither. The Slint skeleton worked, and the numbers
+above show the boundary cost disappearing, which is the part that mattered. The toolkit went the
+other way for three reasons, in order of weight:
+
+1. **Licence.** Slint is `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR commercial`.
+   SpecTape is GPL-2.0-**or-later**, so the GPLv3 path is legal but ends the "or later" freedom
+   for anyone downstream, and the royalty-free path carries a condition: the `AboutSlint` widget
+   in an About dialog reachable from the top-level menu, or a "Made with Slint" badge where the
+   binaries are downloaded. egui and eframe are `MIT OR Apache-2.0`, with no condition at all.
+2. **The app is forms-shaped.** `BlockEditor.tsx` is 556 lines over 25 per-type forms,
+   `DataWindow.tsx` 496, `Dialogs.tsx` 284 — about 1,300 of the 2,223 UI lines are panels over
+   typed data. Slint's structs hold only Slint types, so none of `Body`'s variants can cross as
+   itself: every field needs a property, a setter and a callback, or a generic field-model
+   indirection. In egui the field *is* the Rust data, and the existing Commit/Revert semantics
+   are an edit to a draft copy, which is what the app already does.
+3. **Two of Slint's three advantages did not survive contact.** The macOS menu bar is not a Slint
+   feature: Slint calls **muda**, the same crate Tauri's `menu.rs` already uses here, and muda
+   works from any winit app — eframe exposes the event loop through `event_loop_builder` and
+   delivers clicks on `MenuEvent::receiver()`. And "platform-styled widgets" matters little for an
+   app that has its own design language: neither toolkit draws native controls, and the Slint
+   skeleton painted `src/style.css`'s tokens rather than the cupertino style anyway. What is left
+   is text-input polish, a broader widget set and a more mature AccessKit story — real, and small
+   against the two points above.
+
+**What that leaves unanswered.** Cold start and the 3,000-row cursor move were never read off a
+screen, because the choice stopped depending on them. They are still the premise of this whole
+plan — "near 100 ms, or the premise is wrong" — so they are the **first checkpoint of stage 4**,
+taken on the egui skeleton with the same `--exit-on-draw` and `--bench` flags. If cold start comes
+back anywhere near 355 ms, stop and reconsider before porting the editor.
+
+The Slint skeleton is kept in the branch history rather than in the tree: it is what proved the
+core links natively and produced the boundary table above.
 
 ### Starting stage 3
 
@@ -323,6 +434,82 @@ Port `src/state` into Rust as you go; each area is done when it matches the curr
 6. Files: open, save, save-as, associations, "open with", the emulator launch that already exists
    in `src-tauri/src/emulator.rs`
 
+### Starting stage 4
+
+**The toolkit is egui + eframe, with muda for the menu.** Stage 3's reasoning is above; what it
+means in practice is that the UI is ordinary Rust in the same crate as the state, and the only
+thing that is not is the menu, which muda hands to the platform.
+
+**The skeleton is already converted**, so stage 4 starts on something that runs:
+
+| | |
+|---|---|
+| `native/src/main.rs` | tape loading, the row builder, the measuring flags, `run_command` |
+| `native/src/app.rs` | the window: header, virtualized block list, status bar, keys, perf |
+| `native/src/menu.rs` | muda on macOS, an egui bar drawn from the same table elsewhere |
+| `native/src/menutable.rs` | the command table, now with muda accelerators (`CmdOrCtrl+S`) |
+| `native/tests/menu.rs` | the same four tests against `src/state/commands.ts` |
+
+`build.rs` and `ui/app.slint` are gone; the table is read at runtime instead of generated into
+markup. The binary is **5.2 MB** against Slint's 11.2 MB, both stripped and arm64 only.
+
+Two things the skeleton leaves for stage 4 to do properly: muda only sets the menu on macOS here,
+because Windows needs `init_for_hwnd` with the window handle out of eframe (elsewhere the egui bar
+draws it, without accelerators), and the list is read-only — no selection, no collapsing, no
+dragging.
+
+**First checkpoint, before any porting.** Take the two numbers the stage 3 gate never got — cold
+start (`time … --exit-on-draw`, baseline 355 ms) and a cursor move on 3,000 rows
+(`--rows 3000 --bench 200`, baseline 76–90 ms) — on the egui skeleton. They are the premise of the
+plan, not a detail.
+
+**Where the state lives.** `src/state/store.ts` is 443 lines of Preact signals: two `tapes[side]`,
+`active`, `hex`, `locked`, compare modes, clipboard, `dialog`, `dataWindow`, `theme`, with
+`commit()` snapshotting for undo and `saved` clearing `dirty`. In Rust it becomes a plain struct
+the frame reads and the commands mutate; blocks stay immutable, which is what makes the undo
+snapshot cheap. Port it with the first area rather than up front, so it is shaped by a caller.
+
+**One area per session.** The areas below are the order to do them in, and this file is the handoff
+between them: each session starts by reading it and ends by writing what it did and what the next
+one starts from, the way stages 0–3 did.
+
+### The parity checklist
+
+Every id in `COMMANDS` (`src/state/commands.ts`), which is the complete list of what the app does.
+An area is done when its ids work the way the web app works them, including the enabled rules.
+
+**1. Block list** — selection semantics, collapsed groups as one unit (`unitIndices`), drag & drop,
+cursor, the `.playing` marker:
+`select-all` · `move-up` · `move-down` · `group` · `toggle-collapse` · `collapse-all` ·
+`expand-all` · `select-program` · `extract` · `switch-pane` · `toggle-lock` · `delete` ·
+`duplicate` · `cut` · `copy` · `paste` · `insert` · `undo` · `redo`
+
+**2. Block editor** — per-type forms, Commit/Revert, the footer that spells out
+"Block length N bytes: flag + M data + checksum":
+`view-data` · `view-as-one` · `set-timings` · `insert-file`
+
+**3. Data window** — hex, screen, BASIC, vars, text, disassembly; the per-byte character table is
+`spectrum::charset::char_table`, and the views are virtualized lists of rows:
+(no command ids of its own; driven by `view-data`)
+
+**4. Dialogs, status bar, options**:
+`programs` · `tape-info` · `consistency` · `compare` · `clear-compare` · `find-match` ·
+`toggle-hex` · `opt-hex-bytes` · `opt-zero-based` · `emu-settings` · `shortcuts` · `about`
+
+**5. Playback** — `cpal` output, the progress indicator driven by `playing`, `playingSide`,
+`playingBlock` and `playPos`; `positionAt` stays a binary search on the caller's array:
+`play` · `play-cursor` · `play-selection` · `stop` · `export-wav`
+
+**6. Files** — `rfd` dialogs, the "open with" queue, file associations, and the emulator launch
+that already exists in `src-tauri/src/emulator.rs`:
+`new` · `open` · `open-other` · `save` · `save-as` · `save-tap` · `emu-tape` · `emu-cursor` ·
+`emu-selection`
+
+**Two things the native side must bring with it that the core does not have:** inflating Z-RLE CSW
+blocks needs a zlib crate here (the core is dependency-free on purpose; the web app uses pako), and
+the "hex bytes" and "number blocks from 0" options change formatting everywhere, so they belong in
+the state struct that the row builders read, not in the call sites.
+
 Keep a parity checklist against `src/state/commands.ts` — it is the complete list of what the app
 does, which makes "are we done" answerable rather than a feeling.
 
@@ -367,9 +554,3 @@ the reference implementation and its tests are right here. What does not speed u
   go wrong, because neither fails loudly in a test.
 
 So: days of writing, and a calendar that depends on how quickly the two of us can round-trip.
-
-## What can be done today instead, for a fraction of this
-
-Virtualizing the block list — the one measured performance problem — is an afternoon in the
-current codebase (`src/ui/TapePane.tsx`, following the pattern already in `DataWindow.tsx:198`).
-It does not address the dependency requirement, which is the actual reason for this plan.

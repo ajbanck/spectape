@@ -3,6 +3,8 @@ dist
 scratch
 src-tauri/target
 core/target
+native/target
+native/dist
 src/tzx/core.wasm.ts
 src-tauri/gen
 

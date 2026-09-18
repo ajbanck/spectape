@@ -23,6 +23,9 @@
     "samples": "node scripts/make-samples.mjs",
     "core:wasm": "node scripts/build-wasm.mjs",
     "core:test": "cd core && cargo test",
+    "native": "node scripts/build-native.mjs",
+    "native:debug": "node scripts/build-native.mjs --debug",
+    "native:test": "cd native && cargo test",
     "core:fixtures": "node scripts/dump-blocks.mjs \"public/samples/SpecTape demo.tzx\" \"public/samples/SpecTape demo (variant).tzx\" \"public/samples/SpecTape demo.tap\""
   },
   "dependencies": {

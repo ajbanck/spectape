@@ -1,0 +1,30 @@
+[package]
+name = "spectape-native"
+version = "0.2.2"
+description = "Native shell for SpecTape (stage 3 of docs/rust-migration.md)"
+license = "GPL-2.0-or-later"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "spectape-native"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.36", default-features = false, features = ["glow", "wayland", "x11"] }
+egui = "0.36"
+spectape-core = { path = "../core" }
+
+# The platform's own menu bar. The same crate Tauri uses in src-tauri/src/menu.rs,
+# and the same one Slint called on macOS; here it is called directly.
+[target.'cfg(any(target_os = "macos", target_family = "windows"))'.dependencies]
+muda = "0.20"
+
+# Not the core's size-first profile: this one is a desktop binary, not a wasm
+# module in a web bundle. Kept here rather than in a workspace root so that
+# core/Cargo.toml keeps owning the profile the wasm build needs.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true
