@@ -24,6 +24,14 @@ import * as coreBits from '../src/tzx/bits';
 import * as refBits from './reference/bits';
 import * as corePokes from '../src/tzx/pokes';
 import * as refPokes from './reference/pokes';
+import * as coreCharset from '../src/spectrum/charset';
+import * as refCharset from './reference/spectrum/charset';
+import * as coreScreen from '../src/spectrum/screen';
+import * as refScreen from './reference/spectrum/screen';
+import * as coreBasic from '../src/spectrum/basic';
+import * as refBasic from './reference/spectrum/basic';
+import { disassemble as coreDisassemble } from '../src/spectrum/z80dis';
+import { disassemble as refDisassemble } from './reference/spectrum/z80dis';
 import { serializeTzx, serializeTap } from '../src/tzx/writer';
 import { Block, CREATABLE_IDS, ParsedTape, createBlock, isDataBlock } from '../src/tzx/types';
 import { encodeHeader } from '../src/tzx/describe';
@@ -592,6 +600,174 @@ describe('the Rust conversion, comparison, bits and POKEs against the TypeScript
       try { refPokes.textToPokes(bad, false); } catch (e) { refError = (e as Error).message; }
       expect(coreError).toBe(refError);
       expect(coreError).not.toBe('');
+    }
+  });
+});
+
+describe('the Rust Spectrum side against the TypeScript it replaced', () => {
+  /** A deterministic byte stream, so a failure is reproducible. */
+  function pseudoRandom(n: number, seed = 1): Uint8Array {
+    const out = new Uint8Array(n);
+    let x = seed;
+    for (let i = 0; i < n; i++) {
+      x = (x * 1103515245 + 12345) & 0x7fffffff;
+      out[i] = (x >> 16) & 0xff;
+    }
+    return out;
+  }
+
+  it('maps every character the same way', () => {
+    for (let c = 0; c < 256; c++) {
+      expect(coreCharset.zxChar(c)).toBe(refCharset.zxChar(c));
+      expect(coreCharset.zxChar(c, false)).toBe(refCharset.zxChar(c, false));
+      expect(coreCharset.dumpChar(c)).toBe(refCharset.dumpChar(c));
+    }
+  });
+
+  it('renders screens pixel for pixel', () => {
+    const screens: [Uint8Array, number][] = [
+      [pseudoRandom(6912), 0],
+      [pseudoRandom(6912, 99), 0],
+      [new Uint8Array(6912), 0],
+      [pseudoRandom(100), 0],            // far too short
+      [pseudoRandom(6912), 17],          // offset into the data
+      [pseudoRandom(6912), -50],         // base address before the block
+      [new Uint8Array(0), 0],
+    ];
+    for (const [data, offset] of screens) {
+      for (const opts of [{}, { hideAttributes: true }, { flashPhase: true }, { hideAttributes: true, flashPhase: true }]) {
+        const got = coreScreen.renderScreen(data, offset, opts);
+        const want = refScreen.renderScreen(data, offset, opts);
+        expect(got.length).toBe(want.length);
+        expect(Array.from(got)).toEqual(Array.from(want));
+      }
+      expect(coreScreen.hasFlash(data, offset)).toBe(refScreen.hasFlash(data, offset));
+    }
+  });
+
+  it('decodes and formats Sinclair numbers the same way', () => {
+    const cases: number[][] = [
+      [0x00, 0x00, 0x01, 0x00, 0x00],     // small integer 1
+      [0x00, 0xff, 0xff, 0xff, 0x00],     // small integer -1
+      [0x00, 0x00, 0x39, 0x30, 0x00],     // 12345
+      [0x81, 0x00, 0x00, 0x00, 0x00],     // 1.0
+      [0x82, 0x49, 0x0f, 0xda, 0xa2],     // pi-ish
+      [0x68, 0x00, 0x00, 0x00, 0x00],     // very small
+      [0xff, 0x7f, 0xff, 0xff, 0xff],     // very large
+      [0x80, 0x80, 0x00, 0x00, 0x00],     // negative
+      [0x91, 0x1c, 0x00, 0x00, 0x00],
+    ];
+    for (const c of cases) {
+      const d = new Uint8Array(c);
+      expect(coreBasic.decodeNumber(d, 0)).toBe(refBasic.decodeNumber(d, 0));
+      expect(coreBasic.formatNumber(coreBasic.decodeNumber(d, 0))).toBe(refBasic.formatNumber(refBasic.decodeNumber(d, 0)));
+    }
+    // Out of range gives NaN on both sides, which formats as '?'.
+    expect(coreBasic.decodeNumber(new Uint8Array(3), 0)).toBeNaN();
+    expect(coreBasic.formatNumber(NaN)).toBe(refBasic.formatNumber(NaN));
+    // And the formatting itself, over the shapes it has to get right.
+    const numbers = [
+      0, 1, -1, 42, -42, 1e14, -1e14, 1e15, 1e16, 0.5, -0.5, 1 / 3, 2 / 3, Math.PI, Math.E,
+      1e-7, 1e-6, 1.5e-7, 123456789, 12345678.5, 0.1, 0.2, 0.30000000000000004, 1e21, -1e21,
+      1e-21, 255.00390625, 6.02e23, Infinity, -Infinity,
+    ];
+    for (const v of numbers) {
+      expect(coreBasic.formatNumber(v)).toBe(refBasic.formatNumber(v));
+    }
+  });
+
+  it('lists the same BASIC program', () => {
+    // 10 PRINT "hi": 20 LET a=1 (with a hidden 5-byte number), plus control codes.
+    const line = (no: number, body: number[]) => [no >> 8, no & 0xff, (body.length + 1) & 0xff, (body.length + 1) >> 8, ...body, 0x0d];
+    const prog = new Uint8Array([
+      ...line(10, [0xf5, 0x22, 0x68, 0x69, 0x22]),                        // PRINT "hi"
+      ...line(20, [0xf1, 0x61, 0x3d, 0x31, 0x0e, 0x00, 0x00, 0x01, 0x00, 0x00]), // LET a=1
+      ...line(30, [0xf5, 0x10, 0x02, 0x16, 0x05, 0x0a, 0x06, 0x08, 0x01]), // control codes
+      ...line(40, [0xea, 0x20, 0x80, 0x90, 0xa5]),                        // REM with odd bytes
+      ...line(50, [0xf1, 0x62, 0x3d, 0x32, 0x0e, 0x00, 0x00, 0x63, 0x00, 0x00]), // altered number
+      0x00, 0x3c, 0x00, 0x00,                                             // zero length line
+    ]);
+    const allOpts = [
+      { showNumbers: false, basic128: false, speccyFormat: false },
+      { showNumbers: true, basic128: false, speccyFormat: false },
+      { showNumbers: false, basic128: true, speccyFormat: false },
+      { showNumbers: false, basic128: false, speccyFormat: true },
+      { showNumbers: true, basic128: true, speccyFormat: true },
+    ];
+    for (const opts of allOpts) {
+      const got = coreBasic.listBasic(prog, 0, prog.length, opts);
+      const want = refBasic.listBasic(prog, 0, prog.length, opts);
+      expect(got).toEqual(want);
+      expect(coreBasic.basicToText(got, opts)).toBe(refBasic.basicToText(want, opts));
+    }
+    // A slice of noise must not throw on either side.
+    const noise = pseudoRandom(400, 7);
+    for (const opts of allOpts) {
+      expect(coreBasic.listBasic(noise, 0, noise.length, opts)).toEqual(refBasic.listBasic(noise, 0, noise.length, opts));
+    }
+  });
+
+  it('lists the same variables', () => {
+    // A variable's header byte is its type in the top three bits and the
+    // letter's place in the alphabet in the low five.
+    const head = (kind: number, letter: string) => (kind << 5) | (letter.charCodeAt(0) - 0x60);
+    const num = (v: number[]) => v;
+    const vars = new Uint8Array([
+      head(0b100, 'a'), ...num([0x00, 0x00, 0x2a, 0x00, 0x00]),           // a = 42
+      head(0b011, 'b'), 0x03, 0x00, 0x68, 0x69, 0x21,                     // b$ = "hi!"
+      head(0b101, 'c'), 0xf2, ...num([0x00, 0x00, 0x07, 0x00, 0x00]),     // cr = 7 (long name)
+      head(0b111, 'd'), ...num([0x00, 0x00, 0x01, 0x00, 0x00]), ...num([0x00, 0x00, 0x0a, 0x00, 0x00]),
+      ...num([0x00, 0x00, 0x01, 0x00, 0x00]), 0x0a, 0x00, 0x01,           // FOR control
+      head(0b010, 'e'), 0x0b, 0x00, 0x01, 0x02, 0x00,                     // number array
+      ...num([0x00, 0x00, 0x01, 0x00, 0x00]), ...num([0x00, 0x00, 0x02, 0x00, 0x00]),
+      0x80,
+    ]);
+    expect(coreBasic.listVariables(vars, 0, vars.length)).toEqual(refBasic.listVariables(vars, 0, vars.length));
+    // Character arrays, a zero-dimension array and garbage.
+    const chars = new Uint8Array([head(0b110, 'f'), 0x07, 0x00, 0x01, 0x04, 0x00, 0x68, 0x69, 0x21, 0x3f, 0x80]);
+    expect(coreBasic.listVariables(chars, 0, chars.length)).toEqual(refBasic.listVariables(chars, 0, chars.length));
+    const broken = new Uint8Array([head(0b010, 'g'), 0x03, 0x00, 0x00, 0x80]);
+    expect(coreBasic.listVariables(broken, 0, broken.length)).toEqual(refBasic.listVariables(broken, 0, broken.length));
+    const garbage = new Uint8Array([0x01, 0x02, 0x03]);
+    expect(coreBasic.listVariables(garbage, 0, garbage.length)).toEqual(refBasic.listVariables(garbage, 0, garbage.length));
+    expect(coreBasic.listVariables(new Uint8Array(0), 0, 0)).toEqual(refBasic.listVariables(new Uint8Array(0), 0, 0));
+  });
+
+  it('disassembles every opcode the same way', () => {
+    // Every single-byte opcode, then the same under each prefix, with two
+    // operand bytes after it so the immediates and displacements differ.
+    const cases: number[][] = [];
+    for (let op = 0; op < 256; op++) {
+      cases.push([op, 0x34, 0x12]);
+      cases.push([0xcb, op, 0x34, 0x12]);
+      cases.push([0xed, op, 0x34, 0x12]);
+      for (const prefix of [0xdd, 0xfd]) {
+        cases.push([prefix, op, 0x34, 0x12]);
+        cases.push([prefix, 0xcb, 0x05, op, 0x34]);
+        cases.push([prefix, 0xcb, 0xfb, op, 0x34]);  // negative displacement
+      }
+    }
+    // Prefix chains and a run that falls off the end of the data.
+    cases.push([0xdd, 0xfd, 0xdd, 0x21, 0x00, 0x40]);
+    cases.push([0xdd], [0xed], [0xcb], [0x21], [0x18]);
+    for (const hex of [true, false]) {
+      for (const romLabels of [true, false]) {
+        for (const bytes of cases) {
+          const data = new Uint8Array(bytes);
+          const got = coreDisassemble(data, 0, 0x8000, 4, { hex, romLabels });
+          const want = refDisassemble(data, 0, 0x8000, 4, { hex, romLabels });
+          expect(got).toEqual(want);
+        }
+      }
+    }
+    // A stretch of real-looking code at a ROM-ish base, where labels apply.
+    const rom = pseudoRandom(600, 3);
+    expect(coreDisassemble(rom, 0, 0x0000, 200, {})).toEqual(refDisassemble(rom, 0, 0x0000, 200, {}));
+    expect(coreDisassemble(rom, 13, 0x1234, 50, { hex: false })).toEqual(refDisassemble(rom, 13, 0x1234, 50, { hex: false }));
+    // Calls and jumps into the ROM, which is what the labels are for.
+    const calls = new Uint8Array([0xcd, 0x56, 0x05, 0xc3, 0x00, 0x00, 0xc7, 0x21, 0x56, 0x05, 0x18, 0xfe]);
+    for (const hex of [true, false]) {
+      expect(coreDisassemble(calls, 0, 0x8000, 6, { hex })).toEqual(refDisassemble(calls, 0, 0x8000, 6, { hex }));
     }
   });
 });

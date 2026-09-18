@@ -167,7 +167,14 @@ implementations before the TypeScript goes away:
    tests and 32 Rust ones; the differential test converts between every pair of block types,
    compares every tape pair in all nine mode combinations, and parses a corpus of POKEs text
    including the lines that must fail
-4. `spectrum/basic.ts`, `screen.ts`, `disasm.ts`, `charset.ts`
+4. ~~`spectrum/basic.ts`, `screen.ts`, `z80dis.ts`, `charset.ts`~~ — **done** 2026-09-18.
+   `core/src/spectrum/` holds all four. The differential test walks every opcode under every
+   prefix (about 3,000 instructions, both number bases, labels on and off), every one of the 256
+   characters, seven screens against every combination of the view options, and a BASIC program
+   with hidden numbers and control codes under five option sets. It found three real differences
+   on the way: wire strings were Latin-1, which mangled the block graphics; Rust rounds a tie to
+   the even digit where JavaScript rounds it up, which `toPrecision(8)` needs; and `Infinity`
+   panicked the core, which in wasm means a trap, not an exception
 5. `audio.ts` last — the preallocated-buffer behaviour and `playbackTimeline` are subtle, and the
    existing tests compare against the previous algorithm bit-for-bit
 
@@ -180,12 +187,20 @@ and the `isDataBlock`/`hasData` pair that was always in `types.ts`. Crossing int
 costs more than it saves. The core has its own copy of each, and both sides assert the same table
 (`core/tests/logic.rs` and `test/core.test.ts`), so the copies cannot drift apart.
 
-**Bundle so far:** 187.56 kB before stage 1, then 253.20 after the parser, 335.10 after the
-writer and module 2, and 372.00 kB after module 3 (135.93 kB gzipped). That is 184 kB of growth
-with two module groups left, against the 200–400 kB the plan budgeted for all of it, so the top
-of that range is the realistic landing point. Most of the growth is Rust's formatting machinery
-rather than our code — the padded-hex helper costs 106 bytes of it — and `wasm-opt`, which
-usually trims 10–20%, is not installed here. Worth a serious look at the end of the stage.
+**Bundle, and it needs attention:** 187.56 kB before stage 1, then 253.20 after the parser,
+335.10 after the writer and module 2, 372.00 after module 3, and **480.21 kB after the Spectrum
+side** (182.03 kB gzipped). The wasm itself is 236 kB. That is 293 kB of growth with only the
+audio module left, against the 200–400 kB the plan budgeted for the whole of stages 1 and 2, so
+this will land at the top of the range or just past it.
+
+Where it goes is measurable rather than mysterious: stubbing out the `toPrecision(8)`
+reimplementation alone takes 32 kB off, because it pulls in Rust's float-to-decimal machinery.
+That one is worth its size — it is what makes the BASIC listing show the same numbers as before —
+but the total deserves a proper look when the stage closes. Three things to try, cheapest first:
+`wasm-opt -Oz` from binaryen (not installed here; usually 10–20%), a `panic_immediate_abort`
+build of the standard library (needs nightly, which rustup here has, and would make the wasm
+build depend on it), and serving the module as a separate compressed asset instead of base64
+inside the bundle, which would give back the 33% the encoding costs.
 
 **What the boundary costs, measured on a 3,000-block, 1.2 MB tape** (the size the plan measures
 rendering with): the app encodes the blocks onto the wire for every call, so calls that the UI

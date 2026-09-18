@@ -16,13 +16,19 @@ use crate::describe::{block_length, checksum, decode_header, describe_block, enc
 use crate::parser::{parse_tap, parse_tape, parse_tzx, ParsedTape};
 use crate::pokes::{decode_pokes, encode_pokes, pokes_to_text, text_to_pokes};
 use crate::programs::{detect_programs, group_ranges, tape_title};
+use crate::spectrum::basic::{
+    basic_to_text, decode_number, format_number, list_basic, list_variables, BasicOptions,
+};
+use crate::spectrum::charset::char_table;
+use crate::spectrum::screen::{has_flash, render_screen, ScreenOptions};
+use crate::spectrum::z80dis::{disassemble, DisOptions};
 use crate::types::Block;
 use crate::wire::{
-    decode_bit_data, decode_blocks, decode_header_info, decode_pokes_info, encode_bit_data,
-    encode_blocks_answer, encode_bytes, encode_comparison, encode_content, encode_described, encode_error,
-    encode_f64, encode_header_info, encode_issues, encode_opt_string, encode_pokes_info, encode_programs,
-    encode_ranges, encode_strings, encode_tap, encode_tape, encode_u32s, encode_u8, encode_version,
-    WIRE_VERSION,
+    decode_basic_lines, decode_bit_data, decode_blocks, decode_header_info, decode_pokes_info,
+    encode_basic_lines, encode_bit_data, encode_blocks_answer, encode_bytes, encode_comparison,
+    encode_content, encode_described, encode_dis_lines, encode_error, encode_f64, encode_header_info,
+    encode_issues, encode_opt_string, encode_pokes_info, encode_programs, encode_ranges, encode_strings,
+    encode_tap, encode_tape, encode_u32s, encode_u8, encode_variables, encode_version, WIRE_VERSION,
 };
 use crate::writer::{required_version, save_version, serialize_block, serialize_tap, serialize_tzx, Version};
 use std::alloc::{alloc, dealloc, Layout};
@@ -466,7 +472,7 @@ pub unsafe extern "C" fn core_pokes_to_text(ptr: *const u8, len: usize, hex: u32
 /// `ptr` must point at `len` readable bytes of Latin-1 text.
 #[no_mangle]
 pub unsafe extern "C" fn core_text_to_pokes(ptr: *const u8, len: usize, hex: u32) -> *mut u8 {
-    let text = crate::bytes::latin1_to_string(slice(ptr, len));
+    let text = String::from_utf8_lossy(slice(ptr, len));
     finish(match text_to_pokes(&text, hex != 0) {
         Ok(info) => encode_pokes_info(&info),
         Err(message) => encode_error(&message),
@@ -487,4 +493,114 @@ fn tape_mode(id: u32) -> TapeCompareMode {
         2 => TapeCompareMode::All,
         _ => TapeCompareMode::IgnoreMetadata,
     }
+}
+
+// ---- the Spectrum side ----------------------------------------------------
+
+/// All 256 characters of one of the character tables: 0 with tokens expanded,
+/// 1 without, 2 the hex dump's single-cell version. The app builds the table
+/// once instead of asking per byte. Takes an unused buffer so every entry point
+/// has the same shape on the JavaScript side.
+///
+/// # Safety
+/// `ptr`/`len` are ignored.
+#[no_mangle]
+pub unsafe extern "C" fn core_char_table(_ptr: *const u8, _len: usize, kind: u32) -> *mut u8 {
+    finish(encode_strings(&char_table(kind)))
+}
+
+/// Render a screen dump into RGBA pixels. `flags`: 1 hide attributes, 2 flash phase.
+///
+/// # Safety
+/// `ptr` must point at `len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn core_render_screen(ptr: *const u8, len: usize, offset: i32, flags: u32) -> *mut u8 {
+    let opts = ScreenOptions { hide_attributes: flags & 1 != 0, flash_phase: flags & 2 != 0 };
+    finish(encode_bytes(&render_screen(slice(ptr, len), i64::from(offset), opts)))
+}
+
+/// Does the screen's attribute area use FLASH anywhere?
+///
+/// # Safety
+/// `ptr` must point at `len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn core_has_flash(ptr: *const u8, len: usize, offset: i32) -> *mut u8 {
+    finish(encode_u8(has_flash(slice(ptr, len), i64::from(offset)) as u8))
+}
+
+/// List a BASIC program area. `flags`: 1 show numbers, 2 128k tokens, 4 Spectrum format.
+///
+/// # Safety
+/// `ptr` must point at `len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn core_list_basic(
+    ptr: *const u8,
+    len: usize,
+    start: u32,
+    end: u32,
+    flags: u32,
+) -> *mut u8 {
+    let lines = list_basic(slice(ptr, len), start as usize, end as usize, basic_options(flags));
+    finish(encode_basic_lines(&lines))
+}
+
+/// Render a listing as plain text.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded BASIC lines.
+#[no_mangle]
+pub unsafe extern "C" fn core_basic_to_text(ptr: *const u8, len: usize, flags: u32) -> *mut u8 {
+    finish(match decode_basic_lines(slice(ptr, len)) {
+        Ok(lines) => encode_opt_string(Some(&basic_to_text(&lines, basic_options(flags)))),
+        Err(e) => encode_error(&e.0),
+    })
+}
+
+/// List the variables area.
+///
+/// # Safety
+/// `ptr` must point at `len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn core_list_variables(ptr: *const u8, len: usize, start: u32, end: u32) -> *mut u8 {
+    finish(encode_variables(&list_variables(slice(ptr, len), start as usize, end as usize)))
+}
+
+/// Disassemble `count` instructions. `flags`: 1 hex, 2 ROM labels.
+///
+/// # Safety
+/// `ptr` must point at `len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn core_disassemble(
+    ptr: *const u8,
+    len: usize,
+    offset: u32,
+    base: u32,
+    count: u32,
+    flags: u32,
+) -> *mut u8 {
+    let opts = DisOptions { hex: flags & 1 != 0, rom_labels: flags & 2 != 0 };
+    let lines = disassemble(slice(ptr, len), offset as usize, base, count as usize, opts);
+    finish(encode_dis_lines(&lines))
+}
+
+/// Decode a 5-byte Sinclair floating point number.
+///
+/// # Safety
+/// `ptr` must point at `len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn core_decode_number(ptr: *const u8, len: usize, offset: u32) -> *mut u8 {
+    finish(encode_f64(decode_number(slice(ptr, len), offset as usize)))
+}
+
+/// The listing's spelling of a number.
+///
+/// # Safety
+/// `ptr`/`len` are ignored.
+#[no_mangle]
+pub unsafe extern "C" fn core_format_number(_ptr: *const u8, _len: usize, v: f64) -> *mut u8 {
+    finish(encode_opt_string(Some(&format_number(v))))
+}
+
+fn basic_options(flags: u32) -> BasicOptions {
+    BasicOptions { show_numbers: flags & 1 != 0, basic128: flags & 2 != 0, speccy_format: flags & 4 != 0 }
 }

@@ -270,6 +270,46 @@ export interface PokesInfo {
   trainers: Trainer[];
 }
 
+/** One piece of a listed BASIC line. */
+export interface BasicToken {
+  text: string;
+  kind: 'text' | 'token' | 'number' | 'ctrl' | 'hidden';
+}
+export interface BasicLine {
+  number: number;
+  length: number;
+  offset: number;
+  tokens: BasicToken[];
+  error?: string;
+}
+export interface BasicOptions {
+  showNumbers: boolean; // show the real 5-byte value after the textual number
+  basic128: boolean;
+  speccyFormat: boolean; // 32 columns, control codes interpreted
+}
+
+/** One entry of the Spectrum's variables area. */
+export interface VariableEntry {
+  name: string;
+  type: string;
+  value: string;
+  offset: number;
+  size: number;
+}
+
+/** One disassembled instruction. */
+export interface DisLine {
+  addr: number;
+  bytes: number[];
+  text: string;
+  /** Absolute target of a jump/call, if any (for ROM labels). */
+  target?: number;
+}
+export interface DisOptions {
+  hex?: boolean;
+  romLabels?: boolean;
+}
+
 /** What a parse returns: the blocks, the file's TZX version and any complaints. */
 export interface ParsedTape {
   blocks: Block[];

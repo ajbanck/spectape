@@ -1,40 +1,27 @@
-// ZX Spectrum character set to Unicode.
-const BLOCKS = [' ', '▝', '▘', '▀', '▗', '▐', '▚', '▜', '▖', '▞', '▌', '▛', '▄', '▟', '▙', '█'];
+// ZX Spectrum character set to Unicode. The tables are the Rust core in core/
+// (spectrum/charset.rs); the hex dump asks per byte, so the app fetches all 256
+// characters once and indexes the result instead of crossing per character.
+//
+// The previous implementation lives on as test/reference/spectrum/charset.ts.
+import { charTableCore, CharTable } from '../tzx/core';
 
-export const TOKENS: string[] = [
-  'RND', 'INKEY$', 'PI', 'FN', 'POINT', 'SCREEN$', 'ATTR', 'AT', 'TAB', 'VAL$', 'CODE', 'VAL', 'LEN', 'SIN', 'COS',
-  'TAN', 'ASN', 'ACS', 'ATN', 'LN', 'EXP', 'INT', 'SQR', 'SGN', 'ABS', 'PEEK', 'IN', 'USR', 'STR$', 'CHR$', 'NOT',
-  'BIN', 'OR', 'AND', '<=', '>=', '<>', 'LINE', 'THEN', 'TO', 'STEP', 'DEF FN', 'CAT', 'FORMAT', 'MOVE', 'ERASE',
-  'OPEN #', 'CLOSE #', 'MERGE', 'VERIFY', 'BEEP', 'CIRCLE', 'INK', 'PAPER', 'FLASH', 'BRIGHT', 'INVERSE', 'OVER',
-  'OUT', 'LPRINT', 'LLIST', 'STOP', 'READ', 'DATA', 'RESTORE', 'NEW', 'BORDER', 'CONTINUE', 'DIM', 'REM', 'FOR',
-  'GO TO', 'GO SUB', 'INPUT', 'LOAD', 'LIST', 'LET', 'PAUSE', 'NEXT', 'POKE', 'PRINT', 'PLOT', 'RUN', 'SAVE',
-  'RANDOMIZE', 'IF', 'CLS', 'DRAW', 'CLEAR', 'RETURN', 'COPY',
-];
+const tables = new Map<CharTable, string[]>();
 
-/** Name of a token byte (0xA5-0xFF), or 128k tokens for 0xA3/0xA4 when enabled. */
-export function tokenName(code: number, basic128 = false): string | null {
-  if (code >= 0xa5) return TOKENS[code - 0xa5];
-  if (basic128 && code === 0xa3) return 'SPECTRUM';
-  if (basic128 && code === 0xa4) return 'PLAY';
-  return null;
+function table(kind: CharTable): string[] {
+  let t = tables.get(kind);
+  if (!t) {
+    t = charTableCore(kind);
+    tables.set(kind, t);
+  }
+  return t;
 }
 
 /** Printable form of a single ZX character, for the dump / text views (no tokens expanded). */
 export function zxChar(code: number, expandTokens = true): string {
-  if (code === 0x60) return '£';
-  if (code === 0x7f) return '©';
-  if (code >= 0x20 && code < 0x7f) return String.fromCharCode(code);
-  if (code >= 0x80 && code <= 0x8f) return BLOCKS[code - 0x80];
-  if (code >= 0x90 && code <= 0xa4) return String.fromCharCode(0x2460 + (code - 0x90)); // circled letters for UDGs
-  if (expandTokens && code >= 0xa5) return TOKENS[code - 0xa5];
-  return '.';
+  return table(expandTokens ? 'zx' : 'zxPlain')[code & 0xff];
 }
 
 /** Single-cell character for the hex dump ASCII column. */
 export function dumpChar(code: number): string {
-  if (code === 0x60) return '£';
-  if (code === 0x7f) return '©';
-  if (code >= 0x20 && code < 0x7f) return String.fromCharCode(code);
-  if (code >= 0x80 && code <= 0x8f) return BLOCKS[code - 0x80];
-  return '·';
+  return table('dump')[code & 0xff];
 }

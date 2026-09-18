@@ -7,16 +7,16 @@
 // synchronously, so `initCore` runs once at startup — see src/main.tsx — and
 // the parse functions are sync from then on.
 import { CORE_WASM_BASE64 } from './core.wasm';
-import { latin1ToBytes } from './bytes';
 import {
-  BitData, Block, BlockCompareMode, CompareResult, ContentInfo, HeaderInfo, Issue, ParsedTape,
-  PokesInfo, Program, TapeCompareMode,
+  BasicLine, BasicOptions, BitData, Block, BlockCompareMode, CompareResult, ContentInfo, DisLine,
+  DisOptions, HeaderInfo, Issue, ParsedTape, PokesInfo, Program, TapeCompareMode, VariableEntry,
 } from './types';
 import {
-  decodeBitData, decodeBlocks, decodeBytes, decodeComparison, decodeContent, decodeDescribed,
-  decodeF64, decodeHeaderInfo, decodeIssues, decodeOptString, decodePokesInfo, decodePrograms,
-  decodeRanges, decodeStrings, decodeTap, decodeTape, decodeU32s, decodeU8, decodeVersion,
-  encodeBitData, encodeBlocks, encodeHeaderInfo, encodePokesInfo, WIRE_VERSION,
+  decodeBasicLines, decodeBitData, decodeBlocks, decodeBytes, decodeComparison, decodeContent,
+  decodeDescribed, decodeDisLines, decodeF64, decodeHeaderInfo, decodeIssues, decodeOptString,
+  decodePokesInfo, decodePrograms, decodeRanges, decodeStrings, decodeTap, decodeTape, decodeU32s,
+  decodeU8, decodeVariables, decodeVersion, encodeBasicLines, encodeBitData, encodeBlocks,
+  encodeHeaderInfo, encodePokesInfo, WIRE_VERSION,
 } from './wire';
 
 interface CoreExports {
@@ -53,6 +53,15 @@ interface CoreExports {
   core_encode_pokes(ptr: number, len: number): number;
   core_pokes_to_text(ptr: number, len: number, hex: number): number;
   core_text_to_pokes(ptr: number, len: number, hex: number): number;
+  core_char_table(ptr: number, len: number, kind: number): number;
+  core_render_screen(ptr: number, len: number, offset: number, flags: number): number;
+  core_has_flash(ptr: number, len: number, offset: number): number;
+  core_list_basic(ptr: number, len: number, start: number, end: number, flags: number): number;
+  core_basic_to_text(ptr: number, len: number, flags: number): number;
+  core_list_variables(ptr: number, len: number, start: number, end: number): number;
+  core_disassemble(ptr: number, len: number, offset: number, base: number, count: number, flags: number): number;
+  core_decode_number(ptr: number, len: number, offset: number): number;
+  core_format_number(ptr: number, len: number, v: number): number;
 }
 
 /** The compare modes as `core/src/wasm.rs` numbers them. */
@@ -274,5 +283,53 @@ export function pokesToTextCore(info: PokesInfo, hex: boolean): string {
 }
 
 export function textToPokesCore(text: string, hex: boolean): PokesInfo {
-  return decodePokesInfo(call('core_text_to_pokes', latin1ToBytes(text), hex ? 1 : 0));
+  return decodePokesInfo(call('core_text_to_pokes', new TextEncoder().encode(text), hex ? 1 : 0));
+}
+
+/** Which of the three character tables to fetch; see `core_char_table`. */
+export type CharTable = 'zx' | 'zxPlain' | 'dump';
+
+const NO_INPUT = new Uint8Array(0);
+
+export function charTableCore(kind: CharTable): string[] {
+  const id = kind === 'zx' ? 0 : kind === 'zxPlain' ? 1 : 2;
+  return decodeStrings(call('core_char_table', NO_INPUT, id));
+}
+
+function basicFlags(opts: BasicOptions): number {
+  return (opts.showNumbers ? 1 : 0) | (opts.basic128 ? 2 : 0) | (opts.speccyFormat ? 4 : 0);
+}
+
+export function renderScreenCore(data: Uint8Array, offset: number, opts: { hideAttributes?: boolean; flashPhase?: boolean }): Uint8ClampedArray {
+  const flags = (opts.hideAttributes ? 1 : 0) | (opts.flashPhase ? 2 : 0);
+  return new Uint8ClampedArray(decodeBytes(call('core_render_screen', data, offset, flags)));
+}
+
+export function hasFlashCore(data: Uint8Array, offset: number): boolean {
+  return decodeU8(call('core_has_flash', data, offset)) === 1;
+}
+
+export function listBasicCore(data: Uint8Array, start: number, end: number, opts: BasicOptions): BasicLine[] {
+  return decodeBasicLines(call('core_list_basic', data, start, end, basicFlags(opts)));
+}
+
+export function basicToTextCore(lines: BasicLine[], opts: BasicOptions): string {
+  return decodeOptString(call('core_basic_to_text', encodeBasicLines(lines), basicFlags(opts))) ?? '';
+}
+
+export function listVariablesCore(data: Uint8Array, start: number, end: number): VariableEntry[] {
+  return decodeVariables(call('core_list_variables', data, start, end));
+}
+
+export function disassembleCore(data: Uint8Array, offset: number, base: number, count: number, opts: DisOptions): DisLine[] {
+  const flags = ((opts.hex ?? true) ? 1 : 0) | ((opts.romLabels !== false) ? 2 : 0);
+  return decodeDisLines(call('core_disassemble', data, offset, base, count, flags));
+}
+
+export function decodeNumberCore(data: Uint8Array, offset: number): number {
+  return decodeF64(call('core_decode_number', data, offset));
+}
+
+export function formatNumberCore(v: number): string {
+  return decodeOptString(call('core_format_number', NO_INPUT, v)) ?? '';
 }

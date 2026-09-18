@@ -205,7 +205,7 @@ fn read_bytes(r: &mut Reader) -> ReadResult<Vec<u8>> {
 
 fn read_str(r: &mut Reader) -> ReadResult<String> {
     let n = r.u32()? as usize;
-    r.str(n)
+    Ok(String::from_utf8_lossy(&r.bytes(n)?).into_owned())
 }
 
 fn read_u16s(r: &mut Reader) -> ReadResult<Vec<u16>> {
@@ -384,9 +384,11 @@ fn bytes(w: &mut Vec<u8>, b: &[u8]) {
     w.extend_from_slice(b);
 }
 
+/// Strings travel as UTF-8: most of them are Latin-1 tape text, but the
+/// character table is full of block glyphs, and one encoding for all of them is
+/// one less thing to get wrong.
 fn string(w: &mut Vec<u8>, s: &str) {
-    let b = crate::bytes::string_to_latin1(s);
-    bytes(w, &b);
+    bytes(w, s.as_bytes());
 }
 
 // ---- answers for the description, content, consistency and program calls ----
@@ -651,4 +653,85 @@ pub fn decode_pokes_info(buf: &[u8]) -> ReadResult<crate::pokes::PokesInfo> {
         trainers.push(crate::pokes::Trainer { description, pokes });
     }
     Ok(crate::pokes::PokesInfo { description, trainers })
+}
+
+// ---- the Spectrum side: BASIC listings, variables and disassembly ----------
+
+/// `[u32 count]` then `[u32 number][u32 length][u32 offset][u8 hasError][str error]`
+/// and the line's tokens, each `[str text][str kind]`.
+pub fn encode_basic_lines(lines: &[crate::spectrum::basic::BasicLine]) -> Vec<u8> {
+    let mut w = header();
+    u32v(&mut w, lines.len());
+    for l in lines {
+        u32v(&mut w, l.number as usize);
+        u32v(&mut w, l.length as usize);
+        u32v(&mut w, l.offset as usize);
+        match &l.error {
+            Some(e) => {
+                w.push(1);
+                string(&mut w, e);
+            }
+            None => w.push(0),
+        }
+        u32v(&mut w, l.tokens.len());
+        for t in &l.tokens {
+            string(&mut w, &t.text);
+            string(&mut w, t.kind.name());
+        }
+    }
+    w
+}
+
+/// The same shape without the answer header, as it arrives from JavaScript.
+pub fn decode_basic_lines(buf: &[u8]) -> ReadResult<Vec<crate::spectrum::basic::BasicLine>> {
+    use crate::spectrum::basic::{BasicLine, BasicToken, TokenKind};
+    let mut r = Reader::new(buf);
+    let count = r.u32()? as usize;
+    let mut lines = Vec::with_capacity(count.min(4096));
+    for _ in 0..count {
+        let number = r.u32()?;
+        let length = r.u32()?;
+        let offset = r.u32()?;
+        let error = if r.u8()? == 1 { Some(read_str(&mut r)?) } else { None };
+        let mut tokens = Vec::new();
+        for _ in 0..r.u32()? {
+            let text = read_str(&mut r)?;
+            tokens.push(BasicToken { text, kind: TokenKind::from_name(&read_str(&mut r)?) });
+        }
+        lines.push(BasicLine { number, length, offset, tokens, error });
+    }
+    Ok(lines)
+}
+
+/// `[u32 count]` then `[str name][str type][str value][u32 offset][u32 size]`.
+pub fn encode_variables(vars: &[crate::spectrum::basic::VariableEntry]) -> Vec<u8> {
+    let mut w = header();
+    u32v(&mut w, vars.len());
+    for v in vars {
+        string(&mut w, &v.name);
+        string(&mut w, &v.kind);
+        string(&mut w, &v.value);
+        u32v(&mut w, v.offset as usize);
+        u32v(&mut w, v.size as usize);
+    }
+    w
+}
+
+/// `[u32 count]` then `[u32 addr][bytes][str text][u8 hasTarget][u32 target]`.
+pub fn encode_dis_lines(lines: &[crate::spectrum::z80dis::DisLine]) -> Vec<u8> {
+    let mut w = header();
+    u32v(&mut w, lines.len());
+    for l in lines {
+        u32v(&mut w, l.addr as usize);
+        bytes(&mut w, &l.bytes);
+        string(&mut w, &l.text);
+        match l.target {
+            Some(t) => {
+                w.push(1);
+                u32v(&mut w, t as usize);
+            }
+            None => w.push(0),
+        }
+    }
+    w
 }

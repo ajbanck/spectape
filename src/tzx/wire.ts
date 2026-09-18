@@ -4,9 +4,9 @@
 // them in, so key order (and therefore anything comparing JSON) is unchanged.
 import { Reader, Writer } from './bytes';
 import {
-  ArchiveEntry, BitData, Block, CompareResult, ContentInfo, ContentKind, HardwareEntry, HeaderInfo,
-  Issue, isUnknown, newUid, ParsedTape, PilotRun, Poke, PokesInfo, Program, SelectEntry, SymDef,
-  Trainer,
+  ArchiveEntry, BasicLine, BasicToken, BitData, Block, CompareResult, ContentInfo, ContentKind,
+  DisLine, HardwareEntry, HeaderInfo, Issue, isUnknown, newUid, ParsedTape, PilotRun, Poke,
+  PokesInfo, Program, SelectEntry, SymDef, Trainer, VariableEntry,
 } from './types';
 
 export const WIRE_VERSION = 1;
@@ -57,8 +57,12 @@ export function decodeTape(buf: Uint8Array): ParsedTape {
   return { blocks, major, minor, warnings };
 }
 
+// Strings on the wire are UTF-8, not the Latin-1 of the tape itself: the
+// character table carries block glyphs. `Reader.str` stays Latin-1 for tape bytes.
+const utf8 = { decode: new TextDecoder(), encode: new TextEncoder() };
+
 function str(r: Reader): string {
-  return r.str(r.u32());
+  return utf8.decode.decode(r.bytes(r.u32()));
 }
 
 function bytes(r: Reader): Uint8Array {
@@ -202,8 +206,9 @@ function skipBytes(w: Writer, _b: Uint8Array): void {
 }
 
 function putStr(w: Writer, s: string): void {
-  w.u32(s.length);
-  w.str(s);
+  const b = utf8.encode.encode(s);
+  w.u32(b.length);
+  w.bytes(b);
 }
 
 function putU16s(w: Writer, v: number[]): void {
@@ -541,4 +546,71 @@ export function encodePokesInfo(info: PokesInfo): Uint8Array {
     }
   }
   return w.toUint8Array();
+}
+
+// ---- the Spectrum side: BASIC listings, variables and disassembly -----------
+
+export function decodeBasicLines(buf: Uint8Array): BasicLine[] {
+  const r = new Reader(buf);
+  readHeader(r);
+  const out: BasicLine[] = [];
+  for (let n = r.u32(); n > 0; n--) {
+    const number = r.u32();
+    const length = r.u32();
+    const offset = r.u32();
+    const error = r.u8() === 1 ? str(r) : undefined;
+    const tokens: BasicToken[] = [];
+    for (let k = r.u32(); k > 0; k--) tokens.push({ text: str(r), kind: str(r) as BasicToken['kind'] });
+    const line: BasicLine = { number, length, offset, tokens };
+    if (error !== undefined) line.error = error;
+    out.push(line);
+  }
+  return out;
+}
+
+/** A listing on its way back to the core, for `basicToText`. */
+export function encodeBasicLines(lines: BasicLine[]): Uint8Array {
+  const w = new Writer();
+  w.u32(lines.length);
+  for (const l of lines) {
+    w.u32(l.number);
+    w.u32(l.length);
+    w.u32(l.offset);
+    if (l.error === undefined) w.u8(0);
+    else {
+      w.u8(1);
+      putStr(w, l.error);
+    }
+    w.u32(l.tokens.length);
+    for (const t of l.tokens) {
+      putStr(w, t.text);
+      putStr(w, t.kind);
+    }
+  }
+  return w.toUint8Array();
+}
+
+export function decodeVariables(buf: Uint8Array): VariableEntry[] {
+  const r = new Reader(buf);
+  readHeader(r);
+  const out: VariableEntry[] = [];
+  for (let n = r.u32(); n > 0; n--) {
+    out.push({ name: str(r), type: str(r), value: str(r), offset: r.u32(), size: r.u32() });
+  }
+  return out;
+}
+
+export function decodeDisLines(buf: Uint8Array): DisLine[] {
+  const r = new Reader(buf);
+  readHeader(r);
+  const out: DisLine[] = [];
+  for (let n = r.u32(); n > 0; n--) {
+    const addr = r.u32();
+    const lineBytes = Array.from(bytes(r));
+    const text = str(r);
+    const line: DisLine = { addr, bytes: lineBytes, text };
+    if (r.u8() === 1) line.target = r.u32();
+    out.push(line);
+  }
+  return out;
 }
