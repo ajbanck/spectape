@@ -63,6 +63,21 @@ function replacer(_k: string, v: unknown) {
   return v instanceof Uint8Array ? Array.from(v) : v;
 }
 
+/** Two typed arrays with the same contents, reported by the first index that differs.
+ *  `toEqual` on `Array.from(...)` materialises two JS arrays and walks them as deep
+ *  values, which for a tape rendered at 44.1 kHz is millions of elements and made
+ *  this the slowest file in the suite — slow enough to time out on CI hardware. */
+function expectSameBuffer(got: ArrayLike<number>, want: ArrayLike<number>, what: string) {
+  expect(got.length, `${what}: length`).toBe(want.length);
+  for (let i = 0; i < want.length; i++) {
+    // NaN !== NaN, and toEqual called them equal; no sample should be one, but the
+    // comparison this replaces would not have failed on a pair of them.
+    if (got[i] !== want[i] && !(Number.isNaN(got[i]) && Number.isNaN(want[i]))) {
+      expect.fail(`${what}: differs at index ${i}: got ${got[i]}, want ${want[i]}`);
+    }
+  }
+}
+
 const sample = (name: string) => new Uint8Array(fs.readFileSync(path.resolve('public/samples', name)));
 
 describe('the Rust core against the TypeScript parser it replaced', () => {
@@ -641,8 +656,7 @@ describe('the Rust Spectrum side against the TypeScript it replaced', () => {
       for (const opts of [{}, { hideAttributes: true }, { flashPhase: true }, { hideAttributes: true, flashPhase: true }]) {
         const got = coreScreen.renderScreen(data, offset, opts);
         const want = refScreen.renderScreen(data, offset, opts);
-        expect(got.length).toBe(want.length);
-        expect(Array.from(got)).toEqual(Array.from(want));
+        expectSameBuffer(got, want, `screen ${data.length} bytes at ${offset}, ${JSON.stringify(opts)}`);
       }
       expect(coreScreen.hasFlash(data, offset)).toBe(refScreen.hasFlash(data, offset));
     }
@@ -855,14 +869,13 @@ describe('the Rust audio against the TypeScript it replaced', () => {
         for (const sampleRate of [8000, 44100]) {
           const got = coreAudio.renderTape(blocks, { sampleRate, mode });
           const want = refAudio.renderTape(blocks, { sampleRate, mode });
-          expect(got.length).toBe(want.length);
-          expect(Array.from(got)).toEqual(Array.from(want));
+          expectSameBuffer(got, want, `${mode} at ${sampleRate} Hz`);
         }
       }
       // And a non-default amplitude, which scales every sample.
       const got = coreAudio.renderTape(blocks, { sampleRate: 8000, mode: 'square', amplitude: 0.25 });
       const want = refAudio.renderTape(blocks, { sampleRate: 8000, mode: 'square', amplitude: 0.25 });
-      expect(Array.from(got)).toEqual(Array.from(want));
+      expectSameBuffer(got, want, 'square at 8000 Hz, amplitude 0.25');
     }
   });
 
