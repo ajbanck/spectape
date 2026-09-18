@@ -3184,11 +3184,11 @@ dependencies = [
 
 [[package]]
 name = "spectape-core"
-version = "0.3.2"
+version = "0.3.3"
 
 [[package]]
 name = "spectape-native"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "arboard",
  "block2 0.6.2",

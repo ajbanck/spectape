@@ -181,6 +181,14 @@ fn range_issues(cache: &RowCache, start: usize, end: usize, zero: bool) -> Vec<I
 
 /// The whole list of one pane.
 pub fn show(app: &mut App, ui: &mut Ui, side: Side) {
+    // `App::frame` refreshes the caches too, but a command can run between
+    // there and here — the pane's own Open button, a few lines above this in
+    // `App::pane`, or the in-window menu bar. Loading a tape then leaves rows
+    // built for the tape that *was* open to be indexed against the one that is
+    // open now, and a shorter tape panics on the first group or loop the old
+    // rows remember. `refresh` compares generations, so asking twice in a frame
+    // costs a comparison when nothing has moved.
+    refresh(app);
     let tok = app.tokens;
     let visible = visible_rows(app, side);
     let dragging = app.drag.is_some();
@@ -572,6 +580,38 @@ mod tests {
         let group = app.store.tape(0).blocks[0].uid;
         app.store.toggle_collapse(0, group);
         assert_eq!(visible_rows(&app, 0), vec![0, 3], "only the header and what follows the group");
+    }
+
+    /// A command can run after `App::frame` has refreshed the row caches and
+    /// before the list is drawn: the pane's Open button is a few lines above
+    /// `show` in `App::pane`, and the in-window menu bar fires earlier still.
+    /// Loading a *shorter* tape there left `visible_rows` walking rows the old
+    /// tape had and indexing `blocks` with them — a panic on the first group or
+    /// loop past the end of the new tape, which is every tape with a group in
+    /// it followed by a small one.
+    #[test]
+    fn the_list_survives_a_tape_replaced_mid_frame() {
+        let ctx = egui::Context::default();
+        let mut store = Store::new(Settings::default());
+        // A group starting at index 2, so a two-block tape cannot reach it.
+        let ids = [0x10u8, 0x10, 0x21, 0x10, 0x22, 0x20];
+        let blocks: Vec<Block> = ids.iter().map(|id| Block::new(create_body(*id))).collect();
+        store.tape_mut(0).load("long.tzx".into(), None, blocks, None);
+        let mut app = App::build(&ctx, Menu::headless(), store, std::time::Instant::now(), 0, false);
+        refresh(&mut app);
+
+        // What opening a tape from the pane's own toolbar does, at the point in
+        // the frame where it does it: the caches are already built for the tape
+        // that is being replaced.
+        let short: Vec<Block> = [0x10u8, 0x20].iter().map(|id| Block::new(create_body(*id))).collect();
+        app.store.tape_mut(0).load("short.tzx".into(), None, short, None);
+
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 600.0))),
+            ..Default::default()
+        };
+        ctx.run_ui(input, |ui| show(&mut app, ui, 0)).drop_without_applying_deltas();
+        assert_eq!(app.rows[0].rows.len(), 2, "the list drew the tape that is open now");
     }
 
     #[test]
