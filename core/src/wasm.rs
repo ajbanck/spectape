@@ -705,8 +705,11 @@ pub unsafe extern "C" fn core_render_wav(
 #[no_mangle]
 pub unsafe extern "C" fn core_encode_wav(ptr: *const u8, len: usize, sample_rate: u32, bits: u32) -> *mut u8 {
     let raw = slice(ptr, len);
-    let samples: Vec<f32> =
-        raw.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+    // Stepping over the bytes rather than `chunks_exact(4)`: clippy 1.98 wants
+    // `as_chunks`, which is newer than the oldest toolchain this builds on.
+    let samples: Vec<f32> = (0..raw.len() / 4)
+        .map(|i| f32::from_le_bytes([raw[i * 4], raw[i * 4 + 1], raw[i * 4 + 2], raw[i * 4 + 3]]))
+        .collect();
     finish(encode_bytes(&encode_wav(&samples, sample_rate, bits as u16)))
 }
 
