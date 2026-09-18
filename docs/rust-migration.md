@@ -791,6 +791,30 @@ it is developed.
 Finish what only a real machine can answer. The dead TypeScript and CI were done in stage 5,
 because neither could wait for it, and "Where we start" was re-measured on 2026-09-18.
 
+### After stage 5: what using the app turned up
+
+The stage is done and the app shipped to one desktop — and then a day of using it found things no
+test had, all of them older than stage 5 and none visible from a terminal. Worth listing, because
+the pattern is the lesson:
+
+- **The window's menu bar** was missing on macOS (since stage 3) and on Windows (since stage 5's
+  muda attempt). It is the app's own bar, grouped Left/Right the way `MenuBar.tsx` groups it, and
+  it is back on every platform. The **theme switch** had drifted from that bar into the status bar;
+  the **L/R tag**, the **version pill** and the **toolbar rule** had been flattened into plain text.
+  Every one was a silent divergence from `src/ui/`, which is the app people know.
+- **The editor clipped its screen thumbnail** in a narrow pane — egui clips overflow and shows no
+  scrollbar, so the preview simply vanished. The row wraps now, as the web's flex-wrap does.
+- **A dialog's ✕ did nothing**, in every dialog, because the body's outcome was assigned over it.
+- **`DEFAULT_TAPE`**, a stage 3 convenience, made the installed app open a tape out of the repo it
+  was built in.
+
+What all of these have in common is that the test layer could draw the UI but never *look* at it,
+and never clicked anything. Both holes are now closed: `native/src/shot.rs` rasterises egui's own
+triangles and font atlas into a PNG with no window and no GPU (`--screenshot out.png,WxH
+--theme light --cursor N`), and a test can click a widget by id over two frames. The two
+regression tests that came out of this — a preview that must draw red pixels at three pane widths,
+a ✕ that must close the dialog — both fail against the code they were written for.
+
 ### Starting stage 6
 
 What is left is small and, unusually for this plan, mostly *not* code:
@@ -798,16 +822,23 @@ What is left is small and, unusually for this plan, mostly *not* code:
 - **The two numbers are in** (2026-09-18, read off the bundle): 161 ms cold start against 355 ms,
   and 0.27 ms against 76–90 ms for a cursor move on 3,000 rows. Both are in the table at the top of
   this file, with what they mean. Nothing is owed on the measuring side any more.
-- **A real Windows and a real Linux run.** CI builds and tests both, but nobody has yet clicked the
-  platform menu on Windows, installed the `.msi` and double-clicked a `.tzx`, or run the AppImage.
-  The first tag, or a `workflow_dispatch` run, produces all of it.
+- **A real Windows and a real Linux run.** CI builds, tests and *packages* both — the run of
+  2026-09-18 produced every artifact, including the first `.msi` WiX has managed — but nobody has
+  installed that `.msi` and double-clicked a `.tzx`, or run the AppImage. The Windows exe from that
+  run is also the one that answers the open question above: it is the first Windows build since
+  muda was taken out, so if the black strip and the offset clicks are gone, the revert rested on
+  the right cause; if they survive, the suspect is a display scale other than 100%, which would be
+  stage 4's bug.
 - **macOS is done**: both Apple Event paths were confirmed on the installed bundle (above).
 - **Naming.** The crate directory is still `native/` and the package still `spectape-native`,
   though the binary it builds is `spectape` and it is the only desktop app there is. Renaming the
   directory is a rename of paths in three scripts, two workflows and this file — worth doing
   once the platforms above have been tried, not before.
-- **The dead TypeScript is already gone** (above), so stage 6 keeps only CLAUDE.md's architecture
-  map, which this session also updated, and the measurements.
+- **A UI parity sweep, now that it is cheap.** The four gaps above were found one at a time by
+  someone using the app. `--screenshot` against `docs/screenshot-main.png` would find the rest in
+  one pass, which is a self-contained task for a session with a clean context.
+- **The dead TypeScript is already gone**, and so are the measurements and CLAUDE.md's map, all
+  done during stage 5. Stage 6 is the platforms and the rename.
 
 ## Total
 
