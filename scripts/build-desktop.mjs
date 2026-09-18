@@ -46,8 +46,24 @@ const profile = release ? 'release' : 'debug';
 const packaging = has('--package');
 const universal = has('--universal');
 
-const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
+// The version this packages is the crate's, which is the one the app itself reports
+// through CARGO_PKG_VERSION — in the About dialog, in the macOS About panel and at
+// the top of a crash log. Taking it from package.json instead, as this did until
+// stage 6, meant a bundle could be named after a number the app inside it did not
+// say. desktop/tests/version.rs fails if package.json and core/ have drifted from it.
+const version = cargoVersion(join(crate, 'Cargo.toml'));
 const exe = process.platform === 'win32' ? 'spectape.exe' : 'spectape';
+
+/** The `version = "…"` of a Cargo.toml's [package], read without a TOML parser:
+ *  it is the first such key, before any [section] that follows. */
+function cargoVersion(path) {
+  for (const line of readFileSync(path, 'utf8').split('\n')) {
+    const m = /^version\s*=\s*"([^"]+)"/.exec(line);
+    if (m) return m[1];
+    if (/^\[/.test(line) && !/^\[package\]/.test(line)) break;
+  }
+  throw new Error(`no [package] version in ${path}`);
+}
 
 // Homebrew's cargo is on PATH and is enough for a host build; scripts/build-wasm.mjs
 // explains why the wasm build picks the rustup shim instead. A cross build (the

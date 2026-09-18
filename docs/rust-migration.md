@@ -887,7 +887,7 @@ build them from `desktop/` from now on:
   both, and neither has been seen.
 
 Everything checkable from a macOS terminal passes after the move: `cargo fmt --check`, `clippy
---all-targets -D warnings` and 72 `cargo test`s in `desktop/`, 95 vitest tests, `tsc --noEmit`, and
+--all-targets -D warnings` and 74 `cargo test`s in `desktop/`, 95 vitest tests, `tsc --noEmit`, and
 a build through the renamed script.
 
 ### The parity sweep
