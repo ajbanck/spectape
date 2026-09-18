@@ -5,59 +5,10 @@ import { Panes } from './TapePane';
 import { StatusBar } from './StatusBar';
 import { Dialogs } from './Dialogs';
 import { DataWindow } from './DataWindow';
-import { active, tapes, dialog, dataWindow, setCursor, undo, redo, hex, hexBytes, zeroBased, Side } from '../state/store';
-import { openWithFiles } from '../state/files';
-import { runCommand, isCommand, KEY_COMMANDS } from '../state/commands';
+import { active, tapes, dialog, dataWindow, setCursor, undo, redo, Side } from '../state/store';
+import { runCommand, KEY_COMMANDS } from '../state/commands';
 import { playTape } from '../state/actions';
-import { platform, isDesktop } from '../platform';
 import { playing, stopPlayback } from '../state/player';
-
-type EditableEl = HTMLInputElement | HTMLTextAreaElement;
-
-function focusedField(): EditableEl | null {
-  const el = document.activeElement as HTMLElement | null;
-  if (!el) return null;
-  if (el.tagName === 'INPUT' && !/^(checkbox|radio|button|file)$/.test((el as HTMLInputElement).type)) return el as HTMLInputElement;
-  if (el.tagName === 'TEXTAREA') return el as HTMLTextAreaElement;
-  return null;
-}
-
-function replaceSelection(el: EditableEl, text: string) {
-  const s = el.selectionStart ?? el.value.length;
-  const e = el.selectionEnd ?? s;
-  el.setRangeText(text, s, e, 'end');
-  el.dispatchEvent(new Event('input', { bubbles: true }));
-}
-
-/** Commands from the native (desktop) menu. Edit commands go to a focused text field first. */
-async function handleNativeMenu(id: string, p: Awaited<ReturnType<typeof platform>>) {
-  const field = focusedField();
-  if (field) {
-    switch (id) {
-      case 'undo': document.execCommand('undo'); return;
-      case 'redo': document.execCommand('redo'); return;
-      case 'select-all': field.select(); return;
-      case 'copy':
-      case 'cut': {
-        const sel = field.value.slice(field.selectionStart ?? 0, field.selectionEnd ?? 0);
-        if (sel) {
-          await p.writeClipboard(sel);
-          if (id === 'cut') replaceSelection(field, '');
-        }
-        return;
-      }
-      case 'paste': {
-        const text = await p.readClipboard().catch(() => '');
-        if (text) replaceSelection(field, text);
-        return;
-      }
-    }
-  }
-  if (dialog.value || dataWindow.value) {
-    if (id === 'undo' || id === 'redo' || id === 'cut' || id === 'copy' || id === 'paste' || id === 'delete' || id === 'select-all') return;
-  }
-  if (isCommand(id)) runCommand(id, active.value);
-}
 
 export function App() {
   useEffect(() => {
@@ -123,25 +74,6 @@ export function App() {
       }
     };
     window.addEventListener('beforeunload', onBeforeUnload);
-    // The webview's own context menu (Reload, Back, …) makes no sense in an app window.
-    // Text fields keep theirs, so Cut/Copy/Paste stay where people expect them.
-    const onContextMenu = (e: MouseEvent) => {
-      const el = e.target as HTMLElement | null;
-      if (!el?.closest('input, textarea')) e.preventDefault();
-    };
-    if (isDesktop) document.addEventListener('contextmenu', onContextMenu);
-    // Files opened from the OS (desktop file associations / command line)
-    let disposeChecks = () => {};
-    platform().then((p) => {
-      p.onOpenWith(openWithFiles);
-      p.onMenu((id) => handleNativeMenu(id, p));
-      // Native Options check marks follow the signals (also after in-app or status-bar toggles)
-      disposeChecks = effect(() => {
-        p.setMenuChecked('toggle-hex', hex.value);
-        p.setMenuChecked('opt-hex-bytes', hexBytes.value);
-        p.setMenuChecked('opt-zero-based', zeroBased.value);
-      });
-    });
     // Window title mirrors the active tape
     const disposeTitle = effect(() => {
       const t = tapes[active.value].value;
@@ -149,10 +81,8 @@ export function App() {
     });
     return () => {
       disposeTitle();
-      disposeChecks();
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('beforeunload', onBeforeUnload);
-      document.removeEventListener('contextmenu', onContextMenu);
     };
   }, []);
 

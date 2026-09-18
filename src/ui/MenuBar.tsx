@@ -3,7 +3,6 @@ import { Side, active, theme, cycleTheme } from '../state/store';
 import { COMMANDS, Command, CommandId, commandEnabled, commandKey, commandLabel, runCommand } from '../state/commands';
 import { stopPlayback, playing, playPos } from '../state/player';
 import { fmtTime } from '../state/store';
-import { isDesktop } from '../platform';
 import { Icon, IconBtn } from './icons';
 
 export interface MenuItem {
@@ -77,7 +76,7 @@ function items(side: Side, entries: Entry[]): MenuItem[] {
 export function tapeMenu(side: Side): MenuItem[] {
   return items(side, [
     'new', 'open', 'insert-file', 'sep',
-    ...(isDesktop ? ['save' as const] : []), 'save-as', 'save-tap', 'export-wav', 'sep',
+    'save-as', 'save-tap', 'export-wav', 'sep',
     'play', 'play-cursor', 'play-selection', 'stop', 'emu-tape', 'sep',
     'programs', 'tape-info', 'consistency', 'compare', 'clear-compare', 'sep',
     'undo', 'redo', 'select-all',
@@ -96,7 +95,7 @@ export function blockMenu(side: Side): MenuItem[] {
 }
 
 export function optionsMenu(): MenuItem[] {
-  return items(active.value, ['toggle-hex', 'opt-hex-bytes', 'opt-zero-based', ...(isDesktop ? ['sep' as const, 'emu-settings' as const] : [])]);
+  return items(active.value, ['toggle-hex', 'opt-hex-bytes', 'opt-zero-based']);
 }
 
 export function MenuBar() {
@@ -116,7 +115,7 @@ export function MenuBar() {
   ];
   return (
     <div class="menubar" onClick={(e) => e.stopPropagation()}>
-      <div class="brand"><span class="logo"><Icon name="cassette" size={15} /></span>{!isDesktop && 'SpecTape'}</div>
+      <div class="brand"><span class="logo"><Icon name="cassette" size={15} /></span>SpecTape</div>
       {menus.map(([title, items]) => (
         <div key={title} onMouseEnter={() => open && open !== title && setOpen(title)}>
           <Menu title={title} items={items} open={open === title} onOpen={() => setOpen(title)} onClose={() => setOpen(null)} />

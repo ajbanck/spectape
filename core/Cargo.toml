@@ -1,6 +1,6 @@
 [package]
 name = "spectape-core"
-version = "0.2.2"
+version = "0.3.0"
 description = "TZX/TAP data layer for SpecTape"
 license = "GPL-2.0-or-later"
 edition = "2021"

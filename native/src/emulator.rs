@@ -2,11 +2,10 @@
 //! The program is either chosen by the user or auto-detected (Fuse). It is started directly,
 //! never through a shell, so paths with spaces need no quoting.
 //!
-//! Lifted from `src-tauri/src/emulator.rs` with the two `#[tauri::command]`
-//! attributes dropped: the Tauri build reaches these through the IPC bridge, the
-//! native one calls them. Stage 5 retires the copy in `src-tauri/`, which is why
-//! this file is a copy rather than a shared crate — the two are only both alive
-//! during stage 4.
+//! This is the one piece of the Tauri shell that outlived it: stage 5 deleted
+//! `src-tauri/`, and the two `#[tauri::command]` attributes its copy carried were
+//! the whole difference — the shell reached these through the IPC bridge, this
+//! app calls them.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

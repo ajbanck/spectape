@@ -72,6 +72,7 @@ impl Default for Settings {
 }
 
 fn config_path() -> Option<PathBuf> {
+    #[cfg(not(target_os = "windows"))]
     let home = std::env::var_os("HOME").map(PathBuf::from);
     #[cfg(target_os = "macos")]
     let dir = home.map(|h| h.join("Library/Application Support/SpecTape"));

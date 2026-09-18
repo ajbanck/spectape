@@ -12,7 +12,6 @@ import { viewData, playTape, openInsertDialog, openProgramPicker } from '../stat
 import { IconBtn } from './icons';
 import { playing, playingSide, playingBlock, stopPlayback } from '../state/player';
 import { requiredVersion } from '../tzx/writer';
-import { isDesktop } from '../platform';
 import { contentLabels } from '../tzx/content';
 import { useMemo } from 'preact/hooks';
 
@@ -304,7 +303,7 @@ export function TapePane({ side, grow = 1 }: { side: Side; grow?: number }) {
       onMouseDown={() => (active.value = side)}
     >
       <div class="pane-head">
-        <div class="pane-title filename" title={t.path ?? t.name}>
+        <div class="pane-title filename" title={t.name}>
           <span class="side-tag">{side === 0 ? 'L' : 'R'}</span>
           <span class="fname">{t.name}</span>
           {t.dirty && <span class="dirty-dot" title="Unsaved changes" />}
@@ -312,7 +311,7 @@ export function TapePane({ side, grow = 1 }: { side: Side; grow?: number }) {
         </div>
         <div class="toolbar">
           <IconBtn name="folder" title="Open tape…" onClick={() => confirmDiscard(side, () => pickAndOpen(side))} />
-          <IconBtn name="save" title={isDesktop && t.path ? 'Save' : 'Save as TZX'} disabled={t.blocks.length === 0} onClick={() => saveTzx(side, !(isDesktop && t.path))} />
+          <IconBtn name="save" title="Save as TZX" disabled={t.blocks.length === 0} onClick={() => saveTzx(side)} />
           <span class="vsep" />
           <IconBtn name="plus" title="Insert block…" onClick={() => openInsertDialog(side)} />
           <IconBtn name={playing.value ? 'stop' : 'play'} title={playing.value ? 'Stop playback' : 'Play from cursor'} disabled={t.blocks.length === 0} onClick={() => (playing.value ? stopPlayback() : playTape(side, true))} />

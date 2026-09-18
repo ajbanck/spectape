@@ -10,7 +10,6 @@ export type Side = 0 | 1;
 
 export interface TapeState {
   name: string;
-  path: string | null; // absolute path when opened/saved on the desktop
   blocks: Block[];
   cursor: number; // index of the current block, -1 if none
   selected: Set<number>; // uids
@@ -33,7 +32,7 @@ interface Snapshot {
 export function emptyTape(name = 'new'): TapeState {
   const blocks: Block[] = [];
   return {
-    name, path: null, blocks, cursor: -1, selected: new Set(), collapsed: new Set(), dirty: false, saved: blocks,
+    name, blocks, cursor: -1, selected: new Set(), collapsed: new Set(), dirty: false, saved: blocks,
     loadedVersion: null, compare: new Map(), undo: [], redo: [],
   };
 }
@@ -64,19 +63,6 @@ function loadFlag(key: string): boolean {
 /** Global display options, persisted per browser / desktop install. */
 export const zeroBased = signal(loadFlag('spectape.zeroBased'));
 export const hexBytes = signal(loadFlag('spectape.hexBytes'));
-/** External emulator for "Open in emulator". Empty program = auto-detect (Fuse). */
-export interface EmulatorSettings { program: string; args: string }
-function loadEmulator(): EmulatorSettings {
-  try {
-    const v = JSON.parse(localStorage.getItem('spectape.emulator') ?? '{}');
-    return { program: typeof v.program === 'string' ? v.program : '', args: typeof v.args === 'string' ? v.args : '' };
-  } catch { return { program: '', args: '' }; }
-}
-export const emulator = signal<EmulatorSettings>(loadEmulator());
-export function setEmulator(s: EmulatorSettings) {
-  emulator.value = s;
-  try { localStorage.setItem('spectape.emulator', JSON.stringify(s)); } catch { /* ignore */ }
-}
 export function setOption(opt: 'zeroBased' | 'hexBytes', on: boolean) {
   (opt === 'zeroBased' ? zeroBased : hexBytes).value = on;
   try { localStorage.setItem('spectape.' + opt, on ? '1' : '0'); } catch { /* ignore */ }
@@ -86,8 +72,6 @@ export function applyTheme(t: Theme) {
   try { localStorage.setItem('spectape.theme', t); } catch { /* ignore */ }
   const dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-  // So the next desktop start opens a window of the same colour instead of a white one.
-  platform().then((p) => p.rememberTheme(dark));
 }
 export function cycleTheme() {
   const order: Theme[] = ['system', 'light', 'dark'];
@@ -109,7 +93,7 @@ export type Dialog =
   | { kind: 'wav'; side: Side }
   | { kind: 'programs'; side: Side }
   | { kind: 'confirm'; title: string; lines: string[]; onOk: () => void }
-  | { kind: 'emulator'; notFound?: boolean; onSaved?: () => void };
+  | { kind: 'emulator' };
 export const dialog = signal<Dialog | null>(null);
 
 export function showMessage(title: string, lines: string[] | string) {

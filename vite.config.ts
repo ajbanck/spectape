@@ -2,8 +2,7 @@
 import { defineConfig } from 'vitest/config';
 import preact from '@preact/preset-vite';
 
-// `base: './'` keeps the build relocatable so the same dist/ works on any web path and
-// inside the Tauri desktop shell.
+// `base: './'` keeps the build relocatable, so the same dist/ works on any web path.
 export default defineConfig({
   plugins: [preact()],
   base: './',

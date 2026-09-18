@@ -1,14 +1,13 @@
 //! The native menu against `src/state/commands.ts`.
 //!
-//! The web app, the Tauri menu and this one all address commands by the same ids
-//! and grey them out under the same conditions, so the thing worth testing about
-//! the table is that none of them has drifted. The table is included rather than
-//! imported because it belongs to a binary crate.
+//! The web app and this one address commands by the same ids and grey them out
+//! under the same conditions, so the thing worth testing about the table is that
+//! neither has drifted. The table is included rather than imported because it
+//! belongs to a binary crate.
 
 include!("../src/menutable.rs");
 
 /// Ids that `COMMANDS` has and no menu bar shows: the context menu owns them.
-/// `src-tauri/src/menu.rs` leaves the same one out.
 const NOT_IN_A_MENU: &[&str] = &["toggle-collapse"];
 
 fn commands_ts() -> String {

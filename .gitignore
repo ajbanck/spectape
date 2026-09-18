@@ -1,12 +1,10 @@
 node_modules
 dist
 scratch
-src-tauri/target
 core/target
 native/target
 native/dist
 src/tzx/core.wasm.ts
-src-tauri/gen
 
 # Private tapes stay out of the repo; only the generated samples are tracked
 *.tzx

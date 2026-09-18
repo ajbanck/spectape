@@ -10,7 +10,7 @@ import { groupRanges } from '../tzx/programs';
 import { newTape, saveTzx, saveTap, pickAndOpen, confirmDiscard } from './files';
 import { setSelectionTimings, viewData, playTape, playSelection, openInsertDialog, openInEmulator, selectProgram, openProgramPicker, extractToOtherPane } from './actions';
 import { stopPlayback, playing } from './player';
-import { isDesktop, isMac } from '../platform';
+import { isMac } from '../platform';
 
 export interface Command {
   /** Menu label. A function when it depends on the tape (e.g. collapse vs expand). */
@@ -44,24 +44,17 @@ export function fmtKey(spec: string, mac = isMac): string {
   return parts.sort((a, b) => order.indexOf(a) - order.indexOf(b)).map((p) => MAC_SYMBOLS[p]).join('') + key;
 }
 
-const EMU_PREFIX = isDesktop ? 'Open' : 'Download';
-const EMU_SUFFIX = isDesktop ? ' in emulator' : ' for emulator';
-
 export const COMMANDS = {
   // ---- file
   'new': { label: 'New', run: (s) => confirmDiscard(s, () => newTape(s)) },
   'open': { label: 'Open…', key: sideKey('O'), run: (s) => confirmDiscard(s, () => pickAndOpen(s)) },
   'open-other': { label: 'Open in other pane…', run: (s) => COMMANDS.open.run(other(s)) },
   'insert-file': { label: 'Insert file at cursor…', run: (s) => pickAndOpen(s, true) },
-  /** Writes back in place on the desktop when the tape came from a TZX file, else asks where. */
-  'save': { label: 'Save', key: sideKey('S'), enabled: hasBlocks, run: (s) => saveTzx(s, !(isDesktop && tape(s).path)) },
-  'save-as': {
-    label: isDesktop ? 'Save as TZX…' : 'Save as TZX (download)',
-    key: isDesktop ? undefined : sideKey('S'),
-    enabled: hasBlocks,
-    run: (s) => saveTzx(s, true),
-  },
-  'save-tap': { label: isDesktop ? 'Save as TAP…' : 'Save as TAP (download)', enabled: hasBlocks, run: (s) => saveTap(s) },
+  /** A browser has nowhere to write back to, so Save is Save as. The desktop app writes
+   *  in place — `native/src/files.rs` keeps the id and the rule. */
+  'save': { label: 'Save', key: sideKey('S'), enabled: hasBlocks, run: (s) => saveTzx(s) },
+  'save-as': { label: 'Save as TZX (download)', enabled: hasBlocks, run: (s) => saveTzx(s) },
+  'save-tap': { label: 'Save as TAP (download)', enabled: hasBlocks, run: (s) => saveTap(s) },
   'export-wav': { label: 'Export WAV…', enabled: hasBlocks, run: (s) => (dialog.value = { kind: 'wav', side: s }) },
   // ---- edit
   'undo': { label: 'Undo', key: fmtKey('Mod+Z'), enabled: (s) => tape(s).undo.length > 0, run: undo },
@@ -73,8 +66,8 @@ export const COMMANDS = {
   'delete': { label: 'Delete', key: isMac ? '⌫' : 'Del', enabled: hasCursor, run: deleteUnit },
   'select-all': { label: 'Select all', key: fmtKey('Mod+A'), enabled: hasBlocks, run: selectAll },
   // ---- block
-  // The desktop menu has Mod+Shift+N for this (Mac keyboards have no Insert key); the web view handles Insert.
-  'insert': { label: 'Insert block…', key: isDesktop ? fmtKey('Mod+Shift+N') : 'Ins', run: openInsertDialog },
+  // The desktop menu has Mod+Shift+N for this (Mac keyboards have no Insert key).
+  'insert': { label: 'Insert block…', key: 'Ins', run: openInsertDialog },
   'view-data': { label: 'View data', key: 'Enter', enabled: hasCursor, run: (s) => viewData(s) },
   'view-as-one': { label: 'View selected as one', enabled: hasCursor, run: (s) => viewData(s, true) },
   'move-up': { label: 'Move up', key: fmtKey('Mod+↑'), enabled: hasCursor, run: (s) => moveUnit(s, -1) },
@@ -96,9 +89,9 @@ export const COMMANDS = {
   'play-cursor': { label: 'Play from cursor', enabled: hasBlocks, run: (s) => playTape(s, true) },
   'play-selection': { label: 'Play selection', enabled: hasBlocks, run: playSelection },
   'stop': { label: 'Stop playback', enabled: () => playing.value, run: () => stopPlayback() },
-  'emu-tape': { label: EMU_PREFIX + ' tape' + EMU_SUFFIX, key: isDesktop ? fmtKey('Mod+R') : undefined, enabled: hasBlocks, run: (s) => openInEmulator(s, 'tape') },
-  'emu-cursor': { label: EMU_PREFIX + ' from cursor' + EMU_SUFFIX, key: isDesktop ? fmtKey('Mod+Shift+R') : undefined, enabled: hasCursor, run: (s) => openInEmulator(s, 'cursor') },
-  'emu-selection': { label: EMU_PREFIX + ' selection' + EMU_SUFFIX, enabled: hasCursor, run: (s) => openInEmulator(s, 'selection') },
+  'emu-tape': { label: 'Download tape for emulator', enabled: hasBlocks, run: (s) => openInEmulator(s, 'tape') },
+  'emu-cursor': { label: 'Download from cursor for emulator', enabled: hasCursor, run: (s) => openInEmulator(s, 'cursor') },
+  'emu-selection': { label: 'Download selection for emulator', enabled: hasCursor, run: (s) => openInEmulator(s, 'selection') },
   'emu-settings': { label: 'Emulator…', run: () => (dialog.value = { kind: 'emulator' }) },
   'programs': { label: 'Programs…', key: fmtKey('Mod+J'), enabled: hasBlocks, run: openProgramPicker },
   'tape-info': { label: 'Tape info…', enabled: hasBlocks, run: (s) => (dialog.value = { kind: 'tapeinfo', side: s }) },
@@ -185,12 +178,11 @@ export const SHORTCUTS = [
   'Right click: context menu. Double click: view data, or collapse/expand a group or loop.',
   `Drag & drop blocks to move them within or between tapes; hold ${ALT} or ${CTRL} to copy.`,
   'Drop a TZX/TAP file on a tape to open it; hold Shift to insert it at the cursor.',
-  `${isMac ? 'Delete (⌫)' : 'Delete / Backspace'}: delete current block or selection. ${isDesktop ? `Insert or ${k('Mod+Shift+N')}` : 'Insert'}: insert block.`,
+  `${isMac ? 'Delete (⌫)' : 'Delete / Backspace'}: delete current block or selection. Insert: insert block.`,
   `↑ ↓: move cursor. ${k('Mod+↑')} ${k('Mod+↓')}: move block. Enter: view data. Escape: close window.`,
   `${k('Mod+X')}, ${k('Mod+C')}, ${k('Mod+V')}, ${k('Mod+D')}: cut, copy, paste, duplicate. ${k('Mod+Z')}, ${k('Mod+Shift+Z')}: undo, redo. ${k('Mod+A')}: select all.`,
   `${k('Mod+O')}, ${k('Mod+S')}: open / save left tape. ${k('Mod+Shift+O')}, ${k('Mod+Shift+S')}: open / save right tape. ${k('Mod+G')}: group selection. ${k('Mod+F')}: find match.`,
   `${k('Mod+J')}: pick a program (game) on a collection tape. ${k('Mod+Shift+A')}: select the program at the cursor. ${k('Mod+Shift+E')}: extract the selection to the other pane.`,
   'Tab: switch active tape. Space: play/stop tape from the cursor.',
-  ...(isDesktop ? [`${k('Mod+R')}, ${k('Mod+Shift+R')}: open the tape / the tape from the cursor in the emulator (Options → Emulator…).`] : []),
   'Data window: click a byte and type hex digits to edit; Tab switches to ASCII editing; arrows move.',
 ];

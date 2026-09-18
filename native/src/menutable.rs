@@ -1,9 +1,9 @@
 // The command table the native menu is built from.
 //
-// `menu.rs` builds the platform menu from it — muda on macOS, an egui bar
-// elsewhere — and `tests/menu.rs` checks it against the web app's table. The ids
-// are the ids of `COMMANDS` in `src/state/commands.ts`, which
-// `src-tauri/src/menu.rs` already shares, so the three menus cannot drift apart.
+// `menu.rs` builds the platform menu from it — muda on macOS and Windows, an egui
+// bar elsewhere — and `tests/menu.rs` checks it against the web app's table. The
+// ids are the ids of `COMMANDS` in `src/state/commands.ts`, so the desktop app and
+// the browser one cannot drift apart.
 //
 // What an item *does* lives in `commands.rs`; what it is called, what it is
 // bound to and when it is enabled lives here, because the menu, the context
@@ -62,8 +62,8 @@ pub struct Item {
     /// Command id, matching `COMMANDS` in `src/state/commands.ts`. Empty for a separator.
     pub id: &'static str,
     pub label: &'static str,
-    /// Accelerator in muda's spelling, the same strings `src-tauri/src/menu.rs`
-    /// gives Tauri: `CmdOrCtrl` is ⌘ on macOS and Ctrl elsewhere. Empty for none.
+    /// Accelerator in muda's spelling: `CmdOrCtrl` is ⌘ on macOS and Ctrl
+    /// elsewhere. Empty for none.
     pub keys: &'static str,
     pub check: bool,
     pub need: Need,

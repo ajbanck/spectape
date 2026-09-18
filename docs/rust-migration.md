@@ -654,7 +654,7 @@ installed on the platform before they can be judged:
 Neither can be verified from a macOS terminal: the first needs an installed bundle, the second a
 Windows machine or a CI run.
 
-## Stage 5 — Switch (a day, plus CI round trips)
+## Stage 5 — Switch (a day, plus CI round trips) — **done**
 
 The native binary becomes the desktop app. `src-tauri/` retires except for the emulator code.
 Packaging changes to plain binaries plus a `.app`, `.msi` and an AppImage that no longer carries
@@ -671,10 +671,109 @@ have (the native theme switch sits in the status bar, the web one in the menu ba
 is argv on the native side). Parity is pinned where it matters, against `commands.ts`, by
 `native/tests/menu.rs`.
 
+### What stage 5 did
+
+Done on 2026-09-18.
+
+**The shell is gone.** `src-tauri/` is deleted — 638 lines of Rust, the config, the capabilities
+and the generated schemas — and with it the four `@tauri-apps/*` packages. The icons moved to
+`assets/icons/`, which is now where both the bundles and the window icon come from.
+`emulator.rs` needed no work: `native/src/emulator.rs` was already the same file without the two
+`#[tauri::command]` attributes.
+
+**The front end lost its desktop half**, which is the part of stage 6 that could not wait: with the
+Tauri API gone, `src/platform/tauri.ts` would not have compiled. `isDesktop` and every branch it
+guarded are gone, and so are the `Platform` members only the shell implemented (`onOpenWith`,
+`onMenu`, `setMenuChecked`, `ready`, `rememberTheme`, `detectEmulator`, `pickProgram`,
+`openInEmulator`), the native-menu dispatcher `handleNativeMenu`, and `TapeState.path` — a browser
+has nowhere to write back to, so Save is Save as there. `src/` is 180 lines lighter and says one
+thing: this is the browser build. The command *ids* did not change, which is what
+`native/tests/menu.rs` checks.
+
+**Packaging is one script.** `scripts/build-native.mjs` builds the app and, with `--package`,
+writes what a release carries: `.dmg` + `.zip` on macOS (`--universal` builds both architectures
+and lipos them), an `.AppImage` from an AppDir plus a `.tar.gz` on Linux, and a portable `.exe`
+plus a WiX `.msi` on Windows. CI runs the same command, so a release is not a second way of
+building the app. `npm run desktop` is the build, `desktop:test` the tests, `desktop:package` the
+artifacts; `npm run native*` is gone.
+
+| | Tauri | now |
+|---|---|---|
+| macOS download | 3.6 MB | 3.4 MB dmg (arm64; 6.2 MB binary) |
+| Linux download | 76 MB AppImage | the 6.2 MB binary, in a tarball or an AppImage |
+| Windows download | 1.3 MB + WebView2 runtime | 6.2 MB exe, nothing else |
+| Runtime dependency | system webview | none |
+
+The macOS bundle grew 6.2 MB of binary but the download shrank, because a compressed native binary
+packs better than a bundle whose code lived in the system. The Linux number is the whole point: no
+WebKitGTK to carry.
+
+**The two platform items are both in.**
+
+1. **The macOS Apple Event.** `native/src/macos.rs`. Launch Services sends `kAEOpenDocuments`, not
+   argv; AppKit turns it into `application:openURLs:` on the application delegate; winit registers
+   that delegate (`WinitApplicationDelegate`) and implements only the two lifecycle methods. So the
+   module adds the method to whatever class the delegate is, from an observer of
+   `NSApplicationWillFinishLaunchingNotification` — the last moment before AppKit delivers the
+   launch event and the first at which the delegate exists — and sets the delegate again, because
+   `NSApplication` caches which selectors it answers. Paths land in a queue that `App::frame`
+   drains into `files::open_with`, the way the shell had the front end drain `take_pending_files`.
+   **This is the one thing here that no test can reach**: it needs an installed bundle and a
+   double-click. The test covers the queue and the URL-to-path step.
+2. **muda on Windows.** `Menu::new` now takes eframe's `CreationContext`, pulls the HWND out of it
+   with `raw-window-handle`, and calls `init_for_hwnd`; the egui bar stays for Linux and for
+   `SPECTAPE_EGUI_MENU=1`, which is the way back if a window ever refuses one. Accelerators are
+   still `app.rs`'s job off macOS — muda's own would need a `TranslateAccelerator` in the message
+   loop, which winit does not have — so nothing changed about the keyboard. Checked with
+   `cargo check --target x86_64-pc-windows-msvc`; a real Windows machine has not run it.
+
+**CI builds and tests the desktop app on all three platforms** now (`cargo fmt --check`, `clippy
+-D warnings`, `cargo test`), next to the web job. The release workflow no longer uses
+`tauri-action`: each platform packages itself and a final job drafts the release with `gh`. A
+`workflow_dispatch` run stops before the release and leaves the packages on the run, which is how
+to try the packaging without cutting a release.
+
+**Verified on the installed bundle** (2026-09-18, `/Applications/SpecTape.app`). Both Apple Event
+paths work: a tape opens in SpecTape whether the app was running or not. Two things that took
+finding, neither visible from a terminal:
+
+- Double-clicking a `.tzx` opens *Fuse*, because Launch Services keeps the user's own default and
+  an emulator claimed the extension first. That is macOS working as intended — Finder's Get Info →
+  Open with → Change All is the answer, and no `LSHandlerRank` in our plist should try to win it.
+- `open -a SpecTape` with no document opened **the demo tape**: `DEFAULT_TAPE` was a stage-3
+  convenience, and the fallback path it searches includes `CARGO_MANIFEST_DIR`, which is compiled
+  into the binary — so a shipped app opened whatever tape sat next to the repo it was built in.
+  Started with nothing to open, the app now opens nothing; only `--measure`, `--rows` and `--bench`
+  still fall back to the demo tape, because they have to measure something.
+
+**Two extras that came with the move.** The window and taskbar now carry the app icon (decoded
+from the same PNG with the `png` crate the screen view already uses), and the in-window menu bar is
+covered by a headless frame test on every platform — it used to be compiled out on macOS, where
+it is developed.
+
 ## Stage 6 — Cleanup (an hour)
 
-Delete the dead TypeScript, update CI to build and test the Rust binaries on all three platforms,
-rewrite CLAUDE.md's architecture map, and re-measure the numbers in "Where we start".
+Re-measure the numbers in "Where we start" and finish what only a real machine can answer. The
+dead TypeScript and CI were done in stage 5, because neither could wait for it.
+
+### Starting stage 6
+
+What is left is small and, unusually for this plan, mostly *not* code:
+
+- **The two numbers.** Still owed, still the person's: cold start (`time … --exit-on-draw`,
+  baseline 355 ms) and a 3,000-row cursor move (`--rows 3000 --bench 200`, baseline 76–90 ms).
+  `npm run desktop` prints both commands. Until they are read off a running window, "Where we
+  start" cannot be re-measured, which is stage 6's headline task.
+- **A real Windows and a real Linux run.** CI builds and tests both, but nobody has yet clicked the
+  platform menu on Windows, installed the `.msi` and double-clicked a `.tzx`, or run the AppImage.
+  The first tag, or a `workflow_dispatch` run, produces all of it.
+- **macOS is done**: both Apple Event paths were confirmed on the installed bundle (above).
+- **Naming.** The crate directory is still `native/` and the package still `spectape-native`,
+  though the binary it builds is `spectape` and it is the only desktop app there is. Renaming the
+  directory is a rename of paths in three scripts, two workflows and this file — worth doing
+  once the platforms above have been tried, not before.
+- **The dead TypeScript is already gone** (above), so stage 6 keeps only CLAUDE.md's architecture
+  map, which this session also updated, and the measurements.
 
 ## Total
 

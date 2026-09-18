@@ -1,9 +1,8 @@
-import { Side, tapes, commit, unitIndices, setStatus, showMessage, dialog, dataWindow, active, emulator, blockNo, selectUids, setCursor, insertBlocks } from './store';
+import { Side, tapes, commit, unitIndices, setStatus, showMessage, dialog, dataWindow, active, blockNo, selectUids, setCursor, insertBlocks } from './store';
 import { downloadBytes, newTape, confirmDiscard } from './files';
 import { Program, detectPrograms, programAt } from '../tzx/programs';
 import { checkConsistency } from '../tzx/consistency';
 import { serializeTzx, requiredVersion } from '../tzx/writer';
-import { platform, isDesktop, baseName } from '../platform';
 import { Block, isDataBlock, isUnknown, deepClone, cloneBlock } from '../tzx/types';
 import { playBlocks } from './player';
 import { playbackOrder } from '../tzx/audio';
@@ -118,8 +117,8 @@ function partProblems(side: Side, idx: number[]): string[] {
   return out;
 }
 
-/** Open the tape, the part from the cursor, or the selection in the external emulator.
- *  The web build downloads the TZX instead. */
+/** Download the tape, the part from the cursor, or the selection as a TZX to load in an
+ *  emulator. The desktop app (native/) starts the emulator itself. */
 export function openInEmulator(side: Side, scope: EmulatorScope) {
   const t = tapes[side].value;
   const idx = emulatorIndices(side, scope);
@@ -140,20 +139,8 @@ async function launchEmulator(side: Side, scope: EmulatorScope, idx: number[]) {
   const bytes = serializeTzx(blocks, requiredVersion(blocks));
   const stem = t.name.replace(/\.(tap|tzx)$/i, '') || 'tape';
   const name = scope === 'tape' ? stem : `${stem}-${scope === 'cursor' ? 'from' : 'sel'}${blockNo(idx[0])}`;
-  if (!isDesktop) {
-    const r = await downloadBytes(bytes, name + '.tzx');
-    if (r) setStatus(`Downloaded ${r.name}: open it in your emulator`);
-    return;
-  }
-  const p = await platform();
-  try {
-    const used = await p.openInEmulator({ bytes, name, ...emulator.value });
-    setStatus(`Opened ${blocks.length} block(s) in ${baseName(used).replace(/\.app$/i, '')}`);
-  } catch (e) {
-    const msg = typeof e === 'string' ? e : (e as Error).message ?? String(e);
-    if (msg === 'NOT_FOUND') dialog.value = { kind: 'emulator', notFound: true, onSaved: () => launchEmulator(side, scope, idx) };
-    else showMessage('Open in emulator', [msg, 'Check the emulator in Options → Emulator…']);
-  }
+  const r = await downloadBytes(bytes, name + '.tzx');
+  if (r) setStatus(`Downloaded ${r.name}: open it in your emulator`);
 }
 
 // ---- programs on a collection tape ------------------------------------------

@@ -1,6 +1,6 @@
 // Loader for the Rust tape core. The wasm module is inlined as base64 by
-// scripts/build-wasm.mjs, so the same code path works in the browser, in the
-// Tauri webview and in vitest under node.
+// scripts/build-wasm.mjs, so the same code path works in the browser and in
+// vitest under node. (The desktop app links the core directly — no wasm.)
 //
 // Compiling wasm is asynchronous (browsers refuse a synchronous compile of
 // anything but a tiny module on the main thread), but the app parses tapes

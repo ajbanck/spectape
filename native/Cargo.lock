@@ -3184,19 +3184,23 @@ dependencies = [
 
 [[package]]
 name = "spectape-core"
-version = "0.2.2"
+version = "0.3.0"
 
 [[package]]
 name = "spectape-native"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "arboard",
+ "block2 0.6.2",
  "cpal",
  "eframe",
  "egui",
  "miniz_oxide 0.9.1",
  "muda",
+ "objc2 0.6.4",
+ "objc2-foundation 0.3.2",
  "png",
+ "raw-window-handle",
  "rfd",
  "spectape-core",
 ]

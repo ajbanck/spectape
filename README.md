@@ -12,9 +12,12 @@ Desktop builds for macOS, Linux and Windows are attached to each
 
 | Platform | File | Requirements |
 |---|---|---|
-| macOS 11.3+ (Intel and Apple Silicon) | `.dmg` | The bundle is unsigned: right-click the app and choose **Open** the first time. |
-| Linux | `.deb`, `.rpm` or `.AppImage` | `webkit2gtk-4.1` (Ubuntu 22.04, Debian 12, Fedora 37 or newer). |
-| Windows 10+ | `.msi` or `.exe` installer | WebView2 runtime; the installer fetches it if missing. |
+| macOS 11+ (Intel and Apple Silicon) | `.dmg` or `.zip` | The bundle is unsigned: right-click the app and choose **Open** the first time. |
+| Linux | `.AppImage` or `.tar.gz` | glibc 2.35 (Ubuntu 22.04 and newer); ALSA for sound. |
+| Windows 10+ | `.msi`, or the portable `.exe` | Nothing: the app is one self-contained binary. |
+
+The desktop app is a single native executable — no WebView2, no system WebKit, no WebKitGTK —
+and the `.tzx`/`.tap` file associations come with the bundle (macOS) or the installer (Windows).
 
 The browser version is the same app without native file dialogs: Open reads a file you pick,
 Save downloads a copy. It works in Safari 14.1, Chrome 90, Firefox 90 and newer. To run it
@@ -105,8 +108,9 @@ right end of the menu bar cycles the theme between light, dark and follow-the-sy
 
 Open and Save use native dialogs, **Save (Ctrl+S) writes back to the file you opened**, and `.tzx`
 / `.tap` files are associated with the app so they open with a double click (or by dropping them on
-the app icon in the macOS Dock). Tapes can also be opened from the Left / Right menus or dropped
-onto a tape pane. In the browser, Save downloads a copy, and tapes can be given in the URL:
+the app icon in the macOS Dock). Tapes can also be opened from the Left / Right menus, dropped onto
+a tape pane, or named on the command line — `spectape left.tzx right.tzx` fills both panes. In the
+browser, Save downloads a copy, and tapes can be given in the URL:
 `?open=samples/SpecTape%20demo.tzx&right=other.tzx`.
 
 ### Keyboard and mouse
@@ -144,8 +148,10 @@ the tape toolbar.
 
 ## Building from source
 
-SpecTape is a Vite + Preact + TypeScript front end with a [Tauri 2](https://tauri.app) shell for
-the desktop. Node 22 or newer is needed for the web app.
+SpecTape is two builds over one Rust core (`core/`): the desktop app is Rust and
+[egui](https://github.com/emilk/egui) (`native/`), the browser one a Vite + Preact + TypeScript
+front end (`src/`) on the same core compiled to WebAssembly. Node 22 or newer is needed for the
+web app, a Rust toolchain for either.
 
 ```sh
 npm install
@@ -155,66 +161,75 @@ npm run build      # static site in dist/
 
 ### Desktop app
 
-The desktop build needs a Rust toolchain (`rustup`), plus Xcode command line tools on macOS,
-WebView2 on Windows or `webkit2gtk-4.1` development packages on Linux (see the
-[Tauri prerequisites](https://tauri.app/start/prerequisites/)).
+The desktop build needs a Rust toolchain and the platform's own build tools: Xcode command line
+tools on macOS, and on Linux `libasound2-dev` (sound) plus `libxkbcommon-dev`. Nothing else — the
+app draws its own UI and has no web view.
 
 ```sh
-npm run desktop         # run the desktop app against the dev server (hot reload)
-npx tauri build          # build the installers for the current system
+npm run desktop          # release build, plus SpecTape.app on macOS
+npm run desktop:debug    # a quicker build, for a run
+npm run desktop:test     # cargo test: headless UI frames, the store, the command table
+npm run desktop:package  # the files a release carries, into native/dist/
 ```
 
-`npx tauri build` produces `.msi` and `.exe` installers on Windows; `.deb`, `.rpm` and
-`.AppImage` on Linux; and `SpecTape.app` plus a `.dmg` on macOS. All of them are written to
-`src-tauri/target/release/bundle/`. Two macOS-only shortcuts are also available:
-`npm run desktop:build` builds only `SpecTape.app`, and `npm run desktop:dmg` also packages the
-`.dmg` (which opens a Finder window while it lays out the image).
+`npm run desktop:package` writes a `.dmg` and a `.zip` on macOS, an `.AppImage` (when
+`appimagetool` is on `PATH`) and a `.tar.gz` on Linux, and a portable `.exe` plus an `.msi` on
+Windows (the installer needs the [WiX](https://wixtoolset.org) `wix` command:
+`dotnet tool install --global wix`). Add `--universal` on macOS to build both architectures into
+one binary, the way the release workflow does.
 
 ### Supported systems
 
 | Platform | Minimum | Notes |
 |---|---|---|
-| macOS | 10.13, tested on Big Sur and later | Needs the WebKit that ships with Safari 14.1+. Intel and Apple Silicon via the universal build from CI. |
-| Linux | Ubuntu 22.04, Debian 12, Fedora 37 | Requires `webkit2gtk-4.1`; `.deb`, `.rpm` and AppImage from CI. |
-| Windows | 10 | WebView2 runtime (bundled installer fetches it). |
+| macOS | 11 | Intel and Apple Silicon in one universal binary from CI. |
+| Linux | Ubuntu 22.04 (glibc 2.35) | X11 or Wayland, OpenGL 3.3 or GLES, ALSA for sound. |
+| Windows | 10 | One executable; the `.msi` only adds the shortcut and the file associations. |
 | Browser | Safari 14.1, Chrome 90, Firefox 90 | The build targets these engines explicitly. |
 
-The app deliberately avoids `structuredClone`, CSS `:has()`, `color-mix()` and
+The browser build deliberately avoids `structuredClone`, CSS `:has()`, `color-mix()` and
 `DecompressionStream` so it runs on web views that never received updates.
 
 ## Development
 
 ```sh
-npm run typecheck  # tsc --noEmit
-npm test           # vitest: parser/writer round trips, flow, audio, disassembler, BASIC, content detection
-npm run smoke      # headless-Chrome UI smoke test; screenshots land in scratch/ (dev server must be running)
-npm run samples    # regenerate the synthetic sample tapes in public/samples/
+npm run typecheck    # tsc --noEmit
+npm test             # vitest: parser/writer round trips, flow, audio, disassembler, BASIC, content detection
+npm run core:test    # cargo test in core/: the data layer, against the same cases
+npm run desktop:test # cargo test in native/: the store, the command table, headless UI frames
+npm run smoke        # headless-Chrome UI smoke test; screenshots land in scratch/ (dev server must be running)
+npm run samples      # regenerate the synthetic sample tapes in public/samples/
 ```
 
-- `.github/workflows/ci.yml` typechecks, tests and builds the web app on every push.
-- `.github/workflows/release.yml` builds the desktop bundles (macOS universal, Linux, Windows)
-  on every `v*` tag, or manually from the Actions tab, and attaches them to a **draft** GitHub
+- `.github/workflows/ci.yml` typechecks, tests and builds the web app, and builds and tests the
+  desktop app on macOS, Linux and Windows, on every push.
+- `.github/workflows/release.yml` packages the desktop app (macOS universal, Linux, Windows) on
+  every `v*` tag, or manually from the Actions tab, and attaches the files to a **draft** GitHub
   release. Push a tag such as `v0.1.0`, then publish the draft from the Releases page.
 
 ### Layout
 
 ```
-src/tzx/       TZX/TAP model, parser, writer, audio rendering, consistency check, compare
-src/spectrum/  character set, BASIC lister, screen renderer, Z80 disassembler
-src/state/     application state (Preact signals), undo/redo, file I/O, the command table, playback
+core/          the tape core in Rust: parser, writer, descriptions, content detection,
+               consistency, programs, compare, convert, audio, BASIC, screens, Z80
+native/        the desktop app: egui UI, state, commands, playback (cpal), files (rfd)
+src/tzx/       the browser build's data layer — thin wrappers over core/, compiled to wasm
+src/spectrum/  the same for the BASIC lister, screen renderer and disassembler
+src/state/     browser application state (Preact signals), undo/redo, file I/O, command table
 src/ui/        Preact components: menus, tape panes, block editor, data window, dialogs
-src/platform/  the only file I/O boundary: web (input + download) and Tauri (native dialogs, fs)
-src-tauri/     Tauri desktop shell (Rust): window, native menu, file associations, emulator launch
-test/          Vitest unit tests
-scripts/       headless UI smoke test, sample tape generator
+src/platform/  the browser's file boundary: <input type=file> and downloads
+test/          Vitest unit tests, plus the frozen reference implementation in test/reference/
+scripts/       wasm build, desktop build and packaging, smoke test, sample tape generator
+assets/icons/  application icons for the bundles
 public/samples synthetic demo tapes, generated by scripts/make-samples.mjs
-docs/          screenshots for this README
+docs/          screenshots for this README, and docs/rust-migration.md
 .github/       CI and release workflows
 ```
 
-The rest of the app does not know which environment it runs in: `src/platform/` hides the web
-and Tauri file handling behind one interface, and `src-tauri/` forwards "open with" files and
-native menu events to the front end.
+The two builds share everything expensive: parsing, descriptions, consistency, audio, BASIC and
+the disassembler all live in `core/`, which the desktop app links as a library and the browser one
+calls through WebAssembly. What differs is the UI, and the command table in
+`src/state/commands.ts` is checked against the desktop app's copy by `native/tests/menu.rs`.
 
 ## Credits
 

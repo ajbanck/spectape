@@ -1,8 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'preact/hooks';
 import { ComponentChildren } from 'preact';
-import { dialog, tapes, Side, insertBlocks, setCursor, audioMode, fmtNum, fmtTime, unitIndices, hex, blockNo, zeroBased, emulator, setEmulator } from '../state/store';
+import { dialog, tapes, Side, insertBlocks, setCursor, audioMode, fmtNum, fmtTime, unitIndices, hex, blockNo, zeroBased } from '../state/store';
 import { downloadBytes } from '../state/files';
-import { platform, isDesktop } from '../platform';
 import { createBlock, CREATABLE_IDS, BLOCK_NAMES, Block } from '../tzx/types';
 import { checkConsistency } from '../tzx/consistency';
 import { tapeDuration, renderWav, playbackOrder, blockDuration, TSTATES_PER_SEC } from '../tzx/audio';
@@ -65,7 +64,7 @@ export function Dialogs() {
     case 'programs':
       return <ProgramPicker side={d.side} />;
     case 'emulator':
-      return <EmulatorDialog notFound={d.notFound} onSaved={d.onSaved} />;
+      return <EmulatorDialog />;
   }
   return null;
 }
@@ -241,44 +240,13 @@ export function blockNumberList(blocks: Block[], indices: number[]) {
   return indices.map((i) => `#${blockNo(i)} ${describeBlock(blocks[i], false)}`);
 }
 
-function EmulatorDialog({ notFound, onSaved }: { notFound?: boolean; onSaved?: () => void }) {
-  const [auto, setAuto] = useState(emulator.value.program === '');
-  const [program, setProgram] = useState(emulator.value.program);
-  const [args, setArgs] = useState(emulator.value.args);
-  const [detected, setDetected] = useState<string | null | undefined>(undefined);
-  useEffect(() => { platform().then((p) => p.detectEmulator()).then(setDetected, () => setDetected(null)); }, []);
-  const browse = async () => {
-    const p = await (await platform()).pickProgram();
-    if (p) { setProgram(p); setAuto(false); }
-  };
-  const canSave = auto ? !notFound || !!detected : program.trim() !== '';
-  const save = () => {
-    setEmulator({ program: auto ? '' : program.trim(), args: args.trim() });
-    close();
-    onSaved?.();
-  };
+function EmulatorDialog() {
   return (
-    <Modal
-      title="Emulator"
-      onClose={close}
-      width={560}
-      footer={<><button class="primary" disabled={!canSave} onClick={save}>{onSaved ? 'Save and open' : 'Save'}</button><button onClick={close}>Cancel</button></>}
-    >
-      {!isDesktop && <p class="note">The browser cannot start programs: "Open in emulator" downloads the TZX file instead.</p>}
-      {notFound && <p><b>Fuse was not found.</b> Choose the emulator program to use.</p>}
-      <div class="emu-form">
-        <label><input type="radio" checked={auto} onChange={() => setAuto(true)} /> Auto-detect Fuse</label>
-        <div class="note">{detected === undefined ? 'Looking…' : detected ?? 'Not found'}</div>
-        <label><input type="radio" checked={!auto} onChange={() => setAuto(false)} /> Program</label>
-        <div class="row-flex">
-          <input type="text" value={program} placeholder={isDesktop ? 'Path or program name' : ''} style={{ flex: 1 }}
-            onInput={(e) => { setProgram((e.target as HTMLInputElement).value); setAuto(false); }} />
-          <button onClick={browse} disabled={!isDesktop}>Browse…</button>
-        </div>
-        <label>Extra arguments</label>
-        <input type="text" value={args} placeholder="e.g. --machine plus2a" onInput={(e) => setArgs((e.target as HTMLInputElement).value)} />
-      </div>
-      <p class="note">The tape file is passed as the last argument. On macOS an app (.app) is opened with <code style={{ whiteSpace: 'nowrap' }}>open -a</code>; extra arguments only reach it when it is not already running.</p>
+    <Modal title="Emulator" onClose={close} width={520} footer={<button class="primary" onClick={close}>Close</button>}>
+      <p class="note">
+        A web page cannot start another program, so "Download … for emulator" in the Tape menu writes a
+        TZX file for you to open in your emulator. The desktop app starts one itself.
+      </p>
     </Modal>
   );
 }

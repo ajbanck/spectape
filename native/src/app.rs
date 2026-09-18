@@ -95,7 +95,11 @@ impl App {
         bench: usize,
         exit_on_draw: bool,
     ) -> App {
-        App::build(&cc.egui_ctx, Menu::new(&cc.egui_ctx), store, start, bench, exit_on_draw)
+        // The documents macOS asks for arrive outside the event loop; the queue
+        // they land in wakes this context (see `macos.rs`).
+        #[cfg(target_os = "macos")]
+        crate::macos::wake_with(&cc.egui_ctx);
+        App::build(&cc.egui_ctx, Menu::new(cc), store, start, bench, exit_on_draw)
     }
 
     /// The part of start-up that needs no window, so a test can draw frames.
@@ -525,6 +529,16 @@ impl App {
         // A drop target is only meaningful while the pointer is over a list;
         // each pane sets it again this frame if it is.
         self.drop_target = None;
+        // Tapes the OS asked for while the app was already running (macOS sends an
+        // Apple Event, not argv).
+        #[cfg(target_os = "macos")]
+        {
+            let pending = crate::macos::take_pending();
+            if !pending.is_empty() {
+                crate::files::open_with(&mut self.store, &pending);
+                self.scroll_to_cursor(self.store.active);
+            }
+        }
         self.handle_menu();
         self.handle_keys(ctx);
         if let Some(then) = self.pending.take() {
@@ -534,10 +548,9 @@ impl App {
         self.bench_step(ctx);
         self.sync_menu();
 
-        // On macOS the menu is the platform's own, set by muda; elsewhere it is
-        // drawn here from the same table.
-        #[cfg(not(target_os = "macos"))]
-        {
+        // Where the platform takes a menu bar it is muda's; otherwise it is drawn
+        // here, from the same table.
+        if self.menu.draws_in_window() {
             let side = self.store.active;
             let state = commands::menu_state(self, side);
             let mut fired = None;
@@ -697,6 +710,20 @@ mod tests {
         app.store.toggle_collapse(0, group);
         app.store.set_cursor(0, 0, SelectMode::Single);
         app.context_menu = Some((0, egui::pos2(100.0, 100.0)));
+        draw(&ctx, &mut app);
+    }
+
+    /// The menu bar egui draws when the platform does not take one — Linux, and
+    /// Windows if a window ever refuses muda's. It is drawn here whatever the
+    /// platform, so the path is not left to a machine nobody is testing on.
+    #[test]
+    fn draws_the_in_window_menu_bar() {
+        let ctx = egui::Context::default();
+        let mut store = Store::new(Settings::default());
+        store.tape_mut(0).load("demo.tzx".into(), None, every_block(), None);
+        let mut app = App::build(&ctx, Menu::in_window(), store, Instant::now(), 0, false);
+        assert!(app.menu.draws_in_window());
+        app.store.set_cursor(0, 0, SelectMode::Single);
         draw(&ctx, &mut app);
     }
 

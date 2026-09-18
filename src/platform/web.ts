@@ -27,26 +27,6 @@ export const webPlatform: Platform = {
     return { name: suggestedName };
   },
 
-  onOpenWith() {
-    // The web has no "open with"; tapes come from ?open= (handled in main.tsx) or drops.
-  },
-  onMenu() {
-    // The browser has no native menu.
-  },
-  setMenuChecked() {},
-  async pickProgram() {
-    return null;
-  },
-  async detectEmulator() {
-    return null;
-  },
-  openInEmulator() {
-    return Promise.reject(new Error('A web page cannot start an emulator'));
-  },
-  ready() { /* the browser paints as it likes */ },
-
-  rememberTheme() { /* no window to colour */ },
-
   readClipboard() {
     return navigator.clipboard.readText();
   },

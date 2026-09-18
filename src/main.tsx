@@ -2,7 +2,6 @@ import { render } from 'preact';
 import { App } from './ui/App';
 import { applyTheme, theme } from './state/store';
 import { loadBytes } from './state/files';
-import { platform } from './platform';
 import { initCore } from './tzx/core';
 
 applyTheme(theme.value);
@@ -17,10 +16,6 @@ initCore()
 
 function start() {
   render(<App />, document.getElementById('app')!);
-
-  // Report that the UI is up (SPECTAPE_TIMING). The window itself appears as soon as it exists;
-  // index.html sets the theme before first paint so an empty window still has the right colour.
-  setTimeout(() => platform().then((p) => p.ready()), 0);
 
   // Optional: open tapes given as URL parameters, e.g. ?open=samples/foo.tzx&right=samples/bar.tzx
   const params = new URLSearchParams(location.search);

@@ -1,11 +1,10 @@
 // Platform adapter: the only place that knows how files get in and out of the app.
-// The web build uses <input type=file> and blob downloads; the Tauri desktop build uses
-// native dialogs and writes files in place.
+// This build is the browser one — <input type=file> and blob downloads. The desktop
+// app is `native/` (Rust), which has its own file layer in `native/src/files.rs`;
+// the adapter is kept because the rest of the UI is written against it.
 
 export interface OpenedFile {
   name: string;
-  /** Absolute path when known (desktop only). Enables "save in place". */
-  path?: string;
   bytes: Uint8Array;
 }
 
@@ -18,53 +17,30 @@ export interface SaveRequest {
   suggestedName: string;
   filters: FileFilter[];
   bytes: Uint8Array;
-  /** Write here without asking (desktop). Ignored on the web. */
-  path?: string;
   mime?: string;
 }
 
 export interface SaveResult {
   name: string;
-  path?: string;
 }
 
 export interface Platform {
   openFiles(opts: { filters: FileFilter[]; multiple: boolean }): Promise<OpenedFile[]>;
   /** Resolves to null when the user cancelled. */
   saveFile(req: SaveRequest): Promise<SaveResult | null>;
-  /** Files the app was launched with or asked to open by the OS (desktop). */
-  onOpenWith(cb: (files: OpenedFile[]) => void): void;
-  /** Native application menu commands (desktop). */
-  onMenu(cb: (id: string) => void): void;
-  /** Emulator that auto-detect would start, or null (desktop; always null on the web). */
-  detectEmulator(): Promise<string | null>;
-  /** Write a TZX to a temp file and open it in the emulator (desktop). Rejects with a message;
-   *  'NOT_FOUND' when auto-detect found nothing. Resolves to the program that was started. */
-  openInEmulator(req: { bytes: Uint8Array; name: string; program: string; args: string }): Promise<string>;
-  /** Let the user pick a program (or macOS app); resolves to its path, null when cancelled. */
-  pickProgram(): Promise<string | null>;
-  /** Show the state of a native check menu item (desktop). */
-  setMenuChecked(id: string, checked: boolean): void;
-  /** System clipboard text access for text fields when the native menu is used. */
+  /** System clipboard text access for text fields. */
   readClipboard(): Promise<string>;
   writeClipboard(text: string): Promise<void>;
-  /** The UI has painted; the desktop window may be shown (no-op on the web). */
-  ready(): void;
-  /** Remember the resolved theme so the next window opens in that colour (desktop). */
-  rememberTheme(dark: boolean): void;
 }
 
-export const isDesktop: boolean = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 /** macOS (or iOS): shortcuts use ⌘ there and Ctrl everywhere else. */
 export const isMac: boolean = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
 
 let impl: Promise<Platform> | null = null;
 
-/** Lazily load the right implementation so the web bundle never touches the Tauri API. */
+/** Loaded lazily, so nothing touches the DOM until something asks for a file. */
 export function platform(): Promise<Platform> {
-  if (!impl) {
-    impl = isDesktop ? import('./tauri').then((m) => m.tauriPlatform) : import('./web').then((m) => m.webPlatform);
-  }
+  if (!impl) impl = import('./web').then((m) => m.webPlatform);
   return impl;
 }
 

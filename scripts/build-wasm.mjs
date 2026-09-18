@@ -3,9 +3,8 @@
 //   node scripts/build-wasm.mjs [--check]
 //
 // src/tzx/core.wasm.ts is generated, not tracked. Base64 rather than an asset
-// import because the same module has to load in the browser, in the Tauri
-// webview and in vitest under node, and because inlining it costs one less
-// round trip at startup.
+// import because the same module has to load in the browser and in vitest under
+// node, and because inlining it costs one less round trip at startup.
 //
 // The wasm target needs a rustup toolchain: Homebrew's rust only ships the host
 // standard library. Set CARGO to override which cargo is used.
