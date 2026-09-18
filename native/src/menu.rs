@@ -1,15 +1,18 @@
 //! The application menu, built from the table in `menutable.rs`.
 //!
-//! On macOS and Windows this is the platform's own menu bar: `muda` hangs it on
-//! `NSApp` or on the window, the same crate the Tauri shell reached through
-//! until stage 5, so the accelerators are the platform's too — `CmdOrCtrl+S`
-//! meaning ⌘S here and Ctrl+S there.
+//! On macOS this is the platform's own menu bar: `muda` hangs it on `NSApp`, the
+//! same crate the Tauri shell reached through until stage 5, so the accelerators
+//! are the platform's too — `CmdOrCtrl+S` meaning ⌘S here.
 //!
-//! Elsewhere — Linux, and Windows if `SPECTAPE_EGUI_MENU` is set or the window
-//! handle is not there to hang a menu on — the menu is drawn inside the window
-//! by egui from the same table, and `app.rs` handles the accelerators itself.
-//! Windows needs that anyway: muda's own accelerators want a `TranslateAccelerator`
-//! in the message loop, which winit does not have.
+//! Everywhere else the menu is drawn inside the window by egui from the same
+//! table, and `app.rs` handles the accelerators itself. **Including Windows**:
+//! stage 5 tried `init_for_hwnd` there and it does not work with a winit window
+//! — the menu never appeared, a black strip took its place, and every click
+//! landed one menu-height away from what it hit, because a Win32 menu shrinks
+//! the client area and nothing told egui. muda's accelerators would need a
+//! `TranslateAccelerator` in the message loop as well, which winit does not
+//! have, so the platform bar on Windows is not a small fix and the egui one is
+//! not a stopgap.
 //!
 //! Clicks arrive on muda's own thread, so they land in a queue and wake the UI;
 //! `take_activated` drains it at the top of a frame.
@@ -29,7 +32,7 @@ impl Queue {
     }
 }
 
-#[cfg(any(target_os = "macos", target_family = "windows"))]
+#[cfg(target_os = "macos")]
 mod platform {
     use super::*;
     use crate::menutable::Item;
@@ -67,14 +70,11 @@ mod platform {
     }
 
     impl Menu {
-        /// The platform menu, or `None` when this platform has nowhere to put it —
-        /// on Windows, a window handle eframe did not hand out.
-        pub fn new(ctx: &egui::Context, window: Option<isize>) -> Option<Menu> {
+        pub fn new(ctx: &egui::Context) -> Menu {
             let bar = MudaMenu::new();
 
             // macOS expects the first menu to be the application's own; muda, unlike
-            // Slint, does not add it for you. Windows has no such menu.
-            #[cfg(target_os = "macos")]
+            // Slint, does not add it for you.
             {
                 let about = muda::AboutMetadata {
                     name: Some("SpecTape".into()),
@@ -118,25 +118,7 @@ mod platform {
                 let _ = bar.append(&sub);
             }
 
-            #[cfg(target_os = "macos")]
-            {
-                let _ = window;
-                bar.init_for_nsapp();
-            }
-            #[cfg(target_family = "windows")]
-            {
-                // Safety: eframe hands out the handle of the window it created, and
-                // the menu outlives this call.
-                match window.map(|hwnd| unsafe { bar.init_for_hwnd(hwnd) }) {
-                    Some(Ok(())) => {}
-                    other => {
-                        if let Some(Err(e)) = other {
-                            eprintln!("menu: the window would not take a menu bar ({e}); drawing our own");
-                        }
-                        return None;
-                    }
-                }
-            }
+            bar.init_for_nsapp();
 
             let queue = Queue::default();
             let sink = queue.0.clone();
@@ -147,7 +129,7 @@ mod platform {
                 ctx.request_repaint();
             }));
 
-            Some(Menu { handles, _bar: bar, queue, last: std::cell::RefCell::new((Vec::new(), Vec::new())) })
+            Menu { handles, _bar: bar, queue, last: std::cell::RefCell::new((Vec::new(), Vec::new())) }
         }
 
         /// Push enabled and checked state, skipping the frames where nothing moved.
@@ -237,8 +219,8 @@ mod in_window {
 
 /// Where this run's menu lives.
 pub enum Menu {
-    /// The platform's own bar, through muda.
-    #[cfg(any(target_os = "macos", target_family = "windows"))]
+    /// The platform's own bar, through muda. macOS only — see the note above.
+    #[cfg(target_os = "macos")]
     Platform(platform::Menu),
     /// Drawn in the window by egui.
     InWindow(in_window::Menu),
@@ -247,18 +229,15 @@ pub enum Menu {
 }
 
 impl Menu {
-    /// The menu this platform gets. Windows takes the platform bar unless
-    /// `SPECTAPE_EGUI_MENU` is set, which is the way back if a window ever
-    /// refuses one.
+    /// The menu this platform gets.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Menu {
-        #[cfg(any(target_os = "macos", target_family = "windows"))]
-        if std::env::var_os("SPECTAPE_EGUI_MENU").is_none() {
-            if let Some(menu) = platform::Menu::new(&cc.egui_ctx, window_handle(cc)) {
-                return Menu::Platform(menu);
-            }
+        #[cfg(target_os = "macos")]
+        return Menu::Platform(platform::Menu::new(&cc.egui_ctx));
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = cc;
+            Menu::InWindow(in_window::Menu::new())
         }
-        let _ = cc;
-        Menu::InWindow(in_window::Menu::new())
     }
 
     /// A menu that talks to no platform, for drawing frames in a test.
@@ -266,8 +245,8 @@ impl Menu {
         Menu::Headless
     }
 
-    /// The in-window bar, whatever the platform: what Linux runs, and what lets a
-    /// test on any platform draw it.
+    /// The in-window bar, whatever the platform: what everything but macOS runs,
+    /// and what lets a test on macOS draw it too.
     #[allow(dead_code)]
     pub fn in_window() -> Menu {
         Menu::InWindow(in_window::Menu::new())
@@ -281,7 +260,7 @@ impl Menu {
     /// Push the enabled and checked state of every item.
     pub fn set_state(&self, enabled: &[bool], checked: &[bool]) {
         match self {
-            #[cfg(any(target_os = "macos", target_family = "windows"))]
+            #[cfg(target_os = "macos")]
             Menu::Platform(m) => m.set_state(enabled, checked),
             Menu::InWindow(m) => m.set_state(enabled, checked),
             Menu::Headless => {}
@@ -291,7 +270,7 @@ impl Menu {
     /// Command ids activated since the last call.
     pub fn take_activated(&self) -> Vec<String> {
         match self {
-            #[cfg(any(target_os = "macos", target_family = "windows"))]
+            #[cfg(target_os = "macos")]
             Menu::Platform(m) => m.take_activated(),
             Menu::InWindow(m) => m.take_activated(),
             Menu::Headless => Vec::new(),
@@ -305,20 +284,4 @@ impl Menu {
             _ => None,
         }
     }
-}
-
-/// The window to hang a menu on, as a plain handle: only Windows needs one.
-#[cfg(target_family = "windows")]
-fn window_handle(cc: &eframe::CreationContext<'_>) -> Option<isize> {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    match cc.window_handle().ok()?.as_raw() {
-        RawWindowHandle::Win32(h) => Some(h.hwnd.get()),
-        _ => None,
-    }
-}
-
-/// macOS hangs the menu on the application, not on a window.
-#[cfg(target_os = "macos")]
-fn window_handle(_cc: &eframe::CreationContext<'_>) -> Option<isize> {
-    None
 }

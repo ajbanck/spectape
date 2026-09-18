@@ -30,19 +30,14 @@ png = "0.18"
 # Already in the tree — eframe uses it for the same job.
 arboard = { version = "3.6", default-features = false }
 
-# The platform's own menu bar — the same crate the Tauri shell used here until
-# stage 5, called directly. macOS hangs it on NSApp; Windows needs the window
-# handle, which `raw-window-handle` gets out of eframe's creation context.
-[target.'cfg(any(target_os = "macos", target_family = "windows"))'.dependencies]
-muda = "0.20"
-
-[target.'cfg(target_family = "windows")'.dependencies]
-raw-window-handle = "0.6"
-
-# "Open with" on macOS: Launch Services sends an Apple Event rather than argv, and
-# neither eframe nor winit surfaces it — see src/macos.rs. The same versions the
-# rest of the tree already builds.
+# Two macOS-only needs. `muda` is the platform's own menu bar, the same crate the
+# Tauri shell used here until stage 5, called directly — macOS only, because
+# `init_for_hwnd` on a winit window breaks the client area (see src/menu.rs), so
+# Windows draws the egui bar like Linux. `objc2` is "open with": Launch Services
+# sends an Apple Event rather than argv and neither eframe nor winit surfaces it
+# (see src/macos.rs). Both are versions the rest of the tree already builds.
 [target.'cfg(target_os = "macos")'.dependencies]
+muda = "0.20"
 objc2 = "0.6"
 block2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = [
