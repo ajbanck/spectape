@@ -1,0 +1,260 @@
+//! TZX block model, the port of `src/tzx/types.ts`.
+//!
+//! Where TypeScript puts `id` and `uid` on every block object, Rust splits the
+//! two: [`Block`] holds the `uid` the UI uses for selection and keys, and
+//! [`Body`] is the tagged union, with the block ID implied by the variant (and
+//! carried explicitly only by [`Body::Unknown`]). `isUnknown` therefore becomes
+//! a match, so the `UnknownBlock.id` narrowing trap from CLAUDE.md cannot
+//! happen here.
+//!
+//! Only the block model is ported in stage 0. `BLOCK_NAMES`, `CREATABLE_IDS`,
+//! the hardware tables and `createBlock` are UI-facing and come with the later
+//! stages.
+
+use std::sync::atomic::{AtomicU32, Ordering};
+
+pub type Uid = u32;
+
+static NEXT_UID: AtomicU32 = AtomicU32::new(1);
+
+pub fn new_uid() -> Uid {
+    NEXT_UID.fetch_add(1, Ordering::Relaxed)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct SymDef {
+    /// b0-b1 polarity
+    pub flags: u8,
+    /// Pulse lengths; shorter symbols are padded with 0 when written.
+    pub pulses: Vec<u16>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PilotRun {
+    pub symbol: u8,
+    pub reps: u16,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectEntry {
+    /// Relative, signed.
+    pub offset: i16,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArchiveEntry {
+    pub kind: u8,
+    pub text: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HardwareEntry {
+    pub kind: u8,
+    pub id: u8,
+    pub info: u8,
+}
+
+/// Standard ROM loader timings.
+pub struct RomTimings;
+impl RomTimings {
+    pub const PILOT: u16 = 2168;
+    pub const SYNC1: u16 = 667;
+    pub const SYNC2: u16 = 735;
+    pub const ZERO: u16 = 855;
+    pub const ONE: u16 = 1710;
+    pub const PILOT_HEADER: u16 = 8063;
+    pub const PILOT_DATA: u16 = 3223;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Body {
+    /// 0x10 Standard speed data
+    Standard { pause: u16, data: Vec<u8> },
+    /// 0x11 Turbo speed data
+    Turbo {
+        pilot: u16,
+        sync1: u16,
+        sync2: u16,
+        zero: u16,
+        one: u16,
+        pilot_len: u16,
+        used_bits: u8,
+        pause: u16,
+        data: Vec<u8>,
+    },
+    /// 0x12 Pure tone
+    PureTone { pulse_len: u16, count: u16 },
+    /// 0x13 Pulse sequence
+    PulseSeq { pulses: Vec<u16> },
+    /// 0x14 Pure data
+    PureData { zero: u16, one: u16, used_bits: u8, pause: u16, data: Vec<u8> },
+    /// 0x15 Direct recording
+    Direct { tstates: u16, pause: u16, used_bits: u8, data: Vec<u8> },
+    /// 0x18 CSW recording
+    Csw {
+        pause: u16,
+        sample_rate: u32,
+        /// 1 RLE, 2 Z-RLE
+        compression: u8,
+        pulse_count: u32,
+        data: Vec<u8>,
+    },
+    /// 0x19 Generalized data
+    Generalized {
+        pause: u16,
+        totp: u32,
+        npp: u8,
+        /// Length = asp (0 -> 256)
+        pilot_symbols: Vec<SymDef>,
+        /// Length = totp
+        pilot_stream: Vec<PilotRun>,
+        totd: u32,
+        npd: u8,
+        /// Length = asd
+        data_symbols: Vec<SymDef>,
+        data: Vec<u8>,
+    },
+    /// 0x20 Pause / Stop the tape
+    Pause { pause: u16 },
+    /// 0x21 Group start
+    GroupStart { name: String },
+    /// 0x22 Group end
+    GroupEnd,
+    /// 0x23 Jump to block
+    Jump { offset: i16 },
+    /// 0x24 Loop start
+    LoopStart { count: u16 },
+    /// 0x25 Loop end
+    LoopEnd,
+    /// 0x26 Call sequence
+    Call { offsets: Vec<i16> },
+    /// 0x27 Return from sequence
+    Return,
+    /// 0x28 Select block
+    Select { entries: Vec<SelectEntry> },
+    /// 0x2a Stop the tape if in 48K mode
+    Stop48,
+    /// 0x2b Set signal level
+    SignalLevel { level: u8 },
+    /// 0x30 Text description
+    Text { text: String },
+    /// 0x31 Message
+    Message { time: u8, text: String },
+    /// 0x32 Archive info
+    Archive { entries: Vec<ArchiveEntry> },
+    /// 0x33 Hardware type
+    Hardware { entries: Vec<HardwareEntry> },
+    /// 0x35 Custom info
+    Custom {
+        /// 16 chars, space padded
+        ident: String,
+        data: Vec<u8>,
+    },
+    /// 0x5a Glue, 9 bytes
+    Glue { raw: Vec<u8> },
+    /// Anything the editor does not model, kept verbatim so it round-trips:
+    /// the body bytes after the ID byte, including any length prefix.
+    Unknown { id: u8, raw: Vec<u8> },
+}
+
+impl Body {
+    pub fn id(&self) -> u8 {
+        match self {
+            Body::Standard { .. } => 0x10,
+            Body::Turbo { .. } => 0x11,
+            Body::PureTone { .. } => 0x12,
+            Body::PulseSeq { .. } => 0x13,
+            Body::PureData { .. } => 0x14,
+            Body::Direct { .. } => 0x15,
+            Body::Csw { .. } => 0x18,
+            Body::Generalized { .. } => 0x19,
+            Body::Pause { .. } => 0x20,
+            Body::GroupStart { .. } => 0x21,
+            Body::GroupEnd => 0x22,
+            Body::Jump { .. } => 0x23,
+            Body::LoopStart { .. } => 0x24,
+            Body::LoopEnd => 0x25,
+            Body::Call { .. } => 0x26,
+            Body::Return => 0x27,
+            Body::Select { .. } => 0x28,
+            Body::Stop48 => 0x2a,
+            Body::SignalLevel { .. } => 0x2b,
+            Body::Text { .. } => 0x30,
+            Body::Message { .. } => 0x31,
+            Body::Archive { .. } => 0x32,
+            Body::Hardware { .. } => 0x33,
+            Body::Custom { .. } => 0x35,
+            Body::Glue { .. } => 0x5a,
+            Body::Unknown { id, .. } => *id,
+        }
+    }
+
+    /// `isDataBlock`: blocks that turn bytes into pulses.
+    pub fn is_data_block(&self) -> bool {
+        matches!(
+            self,
+            Body::Standard { .. }
+                | Body::Turbo { .. }
+                | Body::PureData { .. }
+                | Body::Direct { .. }
+                | Body::Generalized { .. }
+        )
+    }
+
+    /// `hasData`: blocks with a byte payload the data window can view/edit.
+    pub fn has_data(&self) -> bool {
+        self.is_data_block() || matches!(self, Body::Custom { .. } | Body::Csw { .. })
+    }
+
+    pub fn is_unknown(&self) -> bool {
+        matches!(self, Body::Unknown { .. })
+    }
+
+    /// The payload of a block that [`Body::has_data`], if any.
+    pub fn data(&self) -> Option<&[u8]> {
+        match self {
+            Body::Standard { data, .. }
+            | Body::Turbo { data, .. }
+            | Body::PureData { data, .. }
+            | Body::Direct { data, .. }
+            | Body::Csw { data, .. }
+            | Body::Generalized { data, .. }
+            | Body::Custom { data, .. } => Some(data),
+            _ => None,
+        }
+    }
+}
+
+/// A block as the app holds it: a body plus the uid the UI keys on.
+#[derive(Clone, Debug)]
+pub struct Block {
+    pub uid: Uid,
+    pub body: Body,
+}
+
+impl Block {
+    /// A block with a fresh uid.
+    pub fn new(body: Body) -> Self {
+        Block { uid: new_uid(), body }
+    }
+
+    pub fn id(&self) -> u8 {
+        self.body.id()
+    }
+
+    /// Deep copy with a new uid, the port of `cloneBlock`. (`deepClone` has no
+    /// counterpart: `Clone` is the deep copy here.)
+    pub fn clone_fresh(&self) -> Self {
+        Block::new(self.body.clone())
+    }
+}
+
+/// Blocks compare by content; uids are identity, not data, and the tests strip
+/// them for exactly this reason.
+impl PartialEq for Block {
+    fn eq(&self, other: &Self) -> bool {
+        self.body == other.body
+    }
+}
+impl Eq for Block {}

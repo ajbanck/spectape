@@ -16,7 +16,9 @@
     "desktop:build": "tauri build --bundles app",
     "desktop:dmg": "tauri build --bundles app,dmg",
     "smoke": "node scripts/ui-smoke.mjs",
-    "samples": "node scripts/make-samples.mjs"
+    "samples": "node scripts/make-samples.mjs",
+    "core:test": "cd core && cargo test",
+    "core:fixtures": "node scripts/dump-blocks.mjs \"public/samples/SpecTape demo.tzx\" \"public/samples/SpecTape demo (variant).tzx\" \"public/samples/SpecTape demo.tap\""
   },
   "dependencies": {
     "@preact/signals": "^2.11.2",

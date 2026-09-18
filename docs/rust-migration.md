@@ -36,13 +36,52 @@ Line counts to port:
 | `src/platform` | 218 | 5 |
 | `src-tauri/src` — emulator launch survives, the rest retires | 635 | 5 |
 
-## Stage 0 — Spike (an hour, throwaway allowed)
+## Stage 0 — Spike (an hour, throwaway allowed) — **done, gate passed**
 
-Port `src/tzx/types.ts` and `parser.ts` to a new `core/` crate. Feed it the same bytes as
-`test/parser.test.ts` and assert the same block structures.
+Port `src/tzx/types.ts` and `parser.ts` to a new `core/` crate. Feed it the same bytes as the
+parser tests in `test/tzx.test.ts` and assert the same block structures.
 
-**Gate:** how long did it take, and did the tests pass unchanged? Multiply out across 3,130 lines
-of logic. If the parser alone is a slog, the rest will be too.
+Done on 2026-09-18 on the `rust-migration` branch, and kept rather than thrown away:
+
+| | |
+|---|---|
+| Ported | `bytes.ts` `Reader`, the block model of `types.ts`, all of `parser.ts` |
+| TypeScript in | ~745 lines (parser 279, model 416 of which the UI tables were skipped, reader ~50) |
+| Rust out | 580 lines of crate (of which 175 are the dump harness below) plus 256 lines of tests |
+| Result | `cargo test`: 11 tests green, no clippy warnings |
+
+The tests are the TypeScript ones ported by hand (unknown blocks preserved, deprecated blocks kept
+raw, truncated block warning, TAP parsing and its two warnings, generalized blocks, uids) **plus a
+differential harness**, which is the part worth keeping:
+
+- `core/src/dump.rs` prints a parsed tape as one canonical line per block.
+- `scripts/dump-blocks.mjs` prints the same format from the TypeScript parser
+  (`npm run core:fixtures`) into `core/tests/fixtures/*.dump`.
+- `npm run core:test` fails with a line-level diff if the two parsers disagree anywhere.
+
+The three sample tapes cover all 25 creatable block types, 36 blocks in total, and both parsers
+agree on every field, byte for byte. Checked by deliberately shifting a pause by one: the harness
+names the file, the line and the field.
+
+**Gate answers.** It took a single session with no reworking, and the tests passed as soon as they
+compiled. About 0.9 lines of Rust per line of TypeScript, and the conversion was mechanical — the
+data layer has no DOM, no async and no cleverness, so nothing above needed redesigning.
+Multiplied across 3,130 lines that is credible as the 1–2 days stage 2 assumes. **Continue.**
+
+Three things learned that change the later stages:
+
+1. `uid` moved off the block: `Block { uid, body }` with the ID implied by the `Body` variant.
+   The `UnknownBlock.id` narrowing trap from CLAUDE.md cannot happen in Rust, and every `match`
+   over block types is exhaustive — the compiler will list what a new block type still needs.
+2. One real bug surfaced: a CSW block whose declared length is under its 10-byte header made
+   `parser.ts` read `r.bytes(len - 10)` with a negative count, which walked the read position
+   *backwards* and parsed the same bytes again. Both implementations now take the normal warning
+   path, with the same message, and keep the remaining bytes verbatim — fixed in `parser.ts`
+   first, so the two stay identical.
+3. TZX text is Latin-1 and `parser.ts` keeps it as a JS string of byte values. Rust keeps a
+   `String` with a one-byte-one-char conversion in `bytes.rs`, which is lossless, but every
+   string that reaches a UI or a file has to go back through `string_to_latin1`. Worth watching in
+   stage 2, where `describe.ts` and the BASIC lister live.
 
 ## Stage 1 — Rust core behind the existing app (half a day)
 
