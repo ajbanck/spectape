@@ -71,9 +71,12 @@ jobs:
           echo "APPIMAGETOOL=$RUNNER_TEMP/appimagetool" >> "$GITHUB_ENV"
 
       # Windows file associations are registry entries, so they need an installer.
+      # Pinned to the last version before the Open Source Maintenance Fee: WiX 6
+      # and 7 refuse to run until their OSMF EULA is accepted (error WIX7015),
+      # and that is a licence decision, not something a workflow should take.
       - name: Install WiX
         if: matrix.name == 'windows'
-        run: dotnet tool install --global wix
+        run: dotnet tool install --global wix --version 5.0.2
 
       - name: Build and package
         run: node scripts/build-native.mjs --package ${{ matrix.args }}
