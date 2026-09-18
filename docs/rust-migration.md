@@ -22,7 +22,7 @@ Warm launch, release build, same machine: the Tauri app on 2026-09-17, the nativ
 | Cold start (window drawn) | 355 ms, of which ~150 ms is WKWebView creation | **161 ms** to the first frame (0.26 s for the whole process, `--exit-on-draw`) |
 | Cursor move, 200-block tape | at the frame floor, nothing to fix | same |
 | Cursor move, 3000-block tape | 76–90 ms, ~90% our own render | **0.27 ms median** (min 0.08, max 1.5) of our own frame build |
-| Desktop download | 3.6 MB macOS, 1.3 MB Windows, 76 MB Linux AppImage | 3.4 MB macOS dmg (arm64), 6.2 MB binary; Linux and Windows are CI's first run to weigh |
+| Desktop download | 3.6 MB macOS, 1.3 MB Windows, 76 MB Linux AppImage | **7.1 MB** macOS dmg (universal), **5.6 MB** Linux AppImage, **7.3 MB** Windows exe (2.9 MB msi) |
 | Runtime dependency | system webview on all three platforms | none |
 
 Two things the numbers say that the plan guessed at:
@@ -32,6 +32,11 @@ Two things the numbers say that the plan guessed at:
   goes; the remaining ~155 ms is dyld, `NSApplication` and the GL context, none of it ours. The
   target in the goal above was ~100 ms, so this lands near it without anything left in the repo to
   cut.
+- **Linux is the only download that shrank**, and it is the one the exercise was about: 76 MB to
+  5.6 MB, because the AppImage no longer carries WebKitGTK. macOS doubled (3.6 → 7.1 MB, and it is
+  universal now) and Windows went from 1.3 MB to 7.3 MB, which is the trade: the UI is in the
+  binary instead of borrowed from the system, and on Windows that is what removes the WebView2
+  dependency altogether. Sizes from the first full packaging run, 2026-09-18.
 - **The list is no longer the frame.** What used to be 76–90 ms of our own rendering is 0.27 ms,
   because the rows are built once per version of the tape and the list is virtualised. During the
   bench the *whole* frame sits at ~12 ms, which is the display's pace with a repaint requested
