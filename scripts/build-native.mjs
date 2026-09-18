@@ -255,12 +255,13 @@ function wxs() {
         </File>
         <ProgId Id="SpecTape.tzx" Description="TZX tape image" Icon="SpecTapeExeFile">
           <Extension Id="tzx" ContentType="application/x-tzx">
-            <Verb Id="open" Command="Open" Argument="&quot;%1&quot;" />
+            <!-- TargetFile is what a non-advertised verb runs; without it WiX0045. -->
+            <Verb Id="open" Command="Open" TargetFile="SpecTapeExeFile" Argument="&quot;%1&quot;" />
           </Extension>
         </ProgId>
         <ProgId Id="SpecTape.tap" Description="TAP tape image" Icon="SpecTapeExeFile">
           <Extension Id="tap" ContentType="application/x-tap">
-            <Verb Id="open" Command="Open" Argument="&quot;%1&quot;" />
+            <Verb Id="open" Command="Open" TargetFile="SpecTapeExeFile" Argument="&quot;%1&quot;" />
           </Extension>
         </ProgId>
       </Component>
