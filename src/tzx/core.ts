@@ -123,10 +123,6 @@ export function initCore(): Promise<void> {
   return loading;
 }
 
-export function coreReady(): boolean {
-  return core !== null;
-}
-
 function requireCore(): CoreExports {
   if (core) return core;
   throw new Error(

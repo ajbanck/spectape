@@ -327,11 +327,6 @@ export function isDataBlock(b: Block): b is DataBlock {
   return b.id === 0x10 || b.id === 0x11 || b.id === 0x14 || b.id === 0x19 || b.id === 0x15;
 }
 
-/** Blocks that carry a byte data payload the data window can view/edit. */
-export function hasData(b: Block): b is DataBlock | CustomBlock | CswBlock {
-  return isDataBlock(b) || b.id === 0x35 || b.id === 0x18;
-}
-
 export function isUnknown(b: Block): b is UnknownBlock {
   return (b as UnknownBlock).unknown === true;
 }

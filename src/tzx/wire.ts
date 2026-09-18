@@ -636,14 +636,6 @@ function f64(r: Reader, buf: Uint8Array): number {
   return v;
 }
 
-export function decodeF64s(buf: Uint8Array): number[] {
-  const r = new Reader(buf);
-  readHeader(r);
-  const out: number[] = [];
-  for (let n = r.u32(); n > 0; n--) out.push(f64(r, buf));
-  return out;
-}
-
 export function decodeTimeline(buf: Uint8Array): { starts: number[]; total: number } {
   const r = new Reader(buf);
   readHeader(r);

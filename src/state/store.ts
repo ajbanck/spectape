@@ -1,10 +1,9 @@
 // Application state as Preact signals, plus the editing operations on it. File I/O lives in
 // files.ts, higher-level actions in actions.ts, and the command table in commands.ts.
-import { signal, computed } from '@preact/signals';
-import { Block, cloneBlock, isUnknown } from '../tzx/types';
+import { signal } from '@preact/signals';
+import { Block, cloneBlock } from '../tzx/types';
 import { BlockCompareMode, TapeCompareMode, CompareResult, compareTapes, findMatches } from '../tzx/compare';
 import { groupRanges } from '../tzx/programs';
-import { platform } from '../platform';
 
 export type Side = 0 | 1;
 
@@ -104,8 +103,6 @@ export function setStatus(s: string) {
   status.value = s;
   if (s) setTimeout(() => { if (status.value === s) status.value = ''; }, 6000);
 }
-
-export const activeTape = computed(() => tapes[active.value].value);
 
 /** Number formatting honouring the Dec/Hex switch. */
 export function fmtNum(n: number): string {
@@ -420,8 +417,4 @@ export function runFindMatch(side: Side) {
 export function clearCompare() {
   patch(0, { compare: new Map() });
   patch(1, { compare: new Map() });
-}
-
-export function blockIsEditable(b: Block) {
-  return !isUnknown(b);
 }

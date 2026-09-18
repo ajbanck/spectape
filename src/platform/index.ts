@@ -61,7 +61,3 @@ export function filtersForName(name: string): FileFilter[] {
 export async function fileToOpened(f: File): Promise<OpenedFile> {
   return { name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) };
 }
-
-export function baseName(path: string): string {
-  return path.split(/[\\/]/).pop() || path;
-}

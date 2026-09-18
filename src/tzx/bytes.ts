@@ -97,18 +97,6 @@ export function latin1ToBytes(s: string): Uint8Array {
   return out;
 }
 
-export function concatBytes(parts: Uint8Array[]): Uint8Array {
-  let n = 0;
-  for (const p of parts) n += p.length;
-  const out = new Uint8Array(n);
-  let o = 0;
-  for (const p of parts) {
-    out.set(p, o);
-    o += p.length;
-  }
-  return out;
-}
-
 export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;

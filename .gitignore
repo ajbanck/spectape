@@ -14,4 +14,3 @@ src/tzx/core.wasm.ts
 !public/samples/*.tzx
 !public/samples/*.tap
 .DS_Store
-src/tzx/core.wasm.ts

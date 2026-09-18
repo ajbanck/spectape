@@ -117,10 +117,6 @@ function isCollapsedGroup(side: Side): boolean {
   return !!cur && groupRanges(t.blocks).has(t.cursor) && t.collapsed.has(cur.uid);
 }
 
-export function isCommand(id: string): id is CommandId {
-  return Object.prototype.hasOwnProperty.call(COMMANDS, id);
-}
-
 export function commandEnabled(id: CommandId, side: Side): boolean {
   const c: Command = COMMANDS[id];
   return c.enabled ? c.enabled(side) : true;
@@ -173,7 +169,7 @@ const MOD = isMac ? '⌘' : 'Ctrl';
 const ALT = isMac ? 'Option' : 'Alt';
 const CTRL = isMac ? 'Control' : 'Ctrl';
 
-export const SHORTCUTS = [
+const SHORTCUTS = [
   `Click: make block current. Shift+click: select range. ${MOD}+click: toggle selection.`,
   'Right click: context menu. Double click: view data, or collapse/expand a group or loop.',
   `Drag & drop blocks to move them within or between tapes; hold ${ALT} or ${CTRL} to copy.`,

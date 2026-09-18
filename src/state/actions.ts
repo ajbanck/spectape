@@ -1,9 +1,9 @@
-import { Side, tapes, commit, unitIndices, setStatus, showMessage, dialog, dataWindow, active, blockNo, selectUids, setCursor, insertBlocks } from './store';
+import { Side, tapes, commit, unitIndices, setStatus, dialog, dataWindow, active, blockNo, selectUids, setCursor, insertBlocks } from './store';
 import { downloadBytes, newTape, confirmDiscard } from './files';
 import { Program, detectPrograms, programAt } from '../tzx/programs';
 import { checkConsistency } from '../tzx/consistency';
 import { serializeTzx, requiredVersion } from '../tzx/writer';
-import { Block, isDataBlock, isUnknown, deepClone, cloneBlock } from '../tzx/types';
+import { isDataBlock, isUnknown, deepClone, cloneBlock } from '../tzx/types';
 import { playBlocks } from './player';
 import { playbackOrder } from '../tzx/audio';
 
@@ -78,14 +78,6 @@ export function playSelection(side: Side) {
 
 export function openInsertDialog(side: Side) {
   dialog.value = { kind: 'insert', side };
-}
-
-export function blocksSummary(blocks: Block[]): string {
-  return `${blocks.length} block(s)`;
-}
-
-export function notImplemented(what: string) {
-  showMessage('Not available', `${what} is not implemented in this version.`);
 }
 
 export type EmulatorScope = 'tape' | 'cursor' | 'selection';

@@ -236,7 +236,7 @@ function WavExport({ side }: { side: Side }) {
   );
 }
 
-export function blockNumberList(blocks: Block[], indices: number[]) {
+function blockNumberList(blocks: Block[], indices: number[]) {
   return indices.map((i) => `#${blockNo(i)} ${describeBlock(blocks[i], false)}`);
 }
 
