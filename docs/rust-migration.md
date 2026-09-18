@@ -737,12 +737,25 @@ WebKitGTK to carry.
    drains into `files::open_with`, the way the shell had the front end drain `take_pending_files`.
    **This is the one thing here that no test can reach**: it needs an installed bundle and a
    double-click. The test covers the queue and the URL-to-path step.
-2. **muda on Windows.** `Menu::new` now takes eframe's `CreationContext`, pulls the HWND out of it
-   with `raw-window-handle`, and calls `init_for_hwnd`; the egui bar stays for Linux and for
-   `SPECTAPE_EGUI_MENU=1`, which is the way back if a window ever refuses one. Accelerators are
-   still `app.rs`'s job off macOS — muda's own would need a `TranslateAccelerator` in the message
-   loop, which winit does not have — so nothing changed about the keyboard. Checked with
-   `cargo check --target x86_64-pc-windows-msvc`; a real Windows machine has not run it.
+2. **muda on Windows — tried, and taken out again.** `Menu::new` pulled the HWND out of eframe's
+   `CreationContext` and called `init_for_hwnd`. On a real Windows machine the window came back
+   with a black strip where the menu should be and every click landing a menu-height from what it
+   hit: a Win32 menu shrinks the client area, and nothing tells egui. So Windows draws the egui bar
+   again, as it did in stage 4.
+
+   Worth separating out, because the report that came with it was three symptoms and only two of
+   them were Windows'. The third — "the menu with Left and Right is gone" — was this change
+   dropping the *in-window* bar on Windows (`draws_in_window()` was true only for the egui variant),
+   which is the same hole macOS had had since stage 3 and is fixed for every platform by putting
+   that bar back everywhere. It never needed muda taken out.
+
+   The geometry is Windows' own in kind — only Windows had a menu attached to its window, and the
+   same build showed neither symptom on macOS — but it is an inference: a post-revert Windows build
+   has not been run. If the strip and the offset survive it, muda was innocent and the next suspect
+   is a display scale factor other than 100%, which would be stage 4's bug rather than this one's.
+   Either way the revert costs nothing: muda's accelerators on Windows want a `TranslateAccelerator`
+   in the message loop, which winit does not have, so the platform bar there was always a menu whose
+   keys someone else handled.
 
 **CI builds and tests the desktop app on all three platforms** now (`cargo fmt --check`, `clippy
 -D warnings`, `cargo test`), next to the web job. The release workflow no longer uses
