@@ -140,12 +140,18 @@ Four things worth knowing before stage 2:
    wasm32 target; it is only missing from `PATH`, where Homebrew's cargo (host target only) wins.
    `scripts/build-wasm.mjs` prefers the rustup shim, and both CI workflows now install the target.
 
-## Stage 2 — The rest of the logic (1–2 days)
+## Stage 2 — The rest of the logic (1–2 days) — **in progress**
 
 Same pattern, module by module, each with its tests ported and running against both
 implementations before the TypeScript goes away:
 
-1. `writer.ts` — round-trip tests already exist and are the strongest safety net here
+1. ~~`writer.ts`~~ — **done** 2026-09-18. `core/src/writer.rs` writes TZX and TAP, decides the
+   required version and serializes single blocks; `src/tzx/writer.ts` is 45 lines of signature
+   over it, and the old implementation is frozen as `test/reference/writer.ts`. The wire format
+   now works both ways (`encode_blocks`/`decode_blocks` in Rust, `encodeBlocks` in TypeScript),
+   which is what every later module needs to receive a tape. Round trips, the version rules, the
+   TAP export and the cases the writer papers over (over-long text, short idents, odd glue,
+   symbol pulses shorter than `npp`) are checked in both suites: 66 TypeScript tests, 19 Rust.
 2. `describe.ts`, `content.ts`, `consistency.ts`, `programs.ts` — pure, well covered
 3. `compare.ts`, `convert.ts`, `pokes.ts`, `bits.ts`
 4. `spectrum/basic.ts`, `screen.ts`, `disasm.ts`, `charset.ts`
@@ -154,6 +160,23 @@ implementations before the TypeScript goes away:
 
 **Ships after each module.** At the end, all 3,130 lines of logic are Rust, proven in production
 through the existing app, and the browser version still works.
+
+**What the boundary costs, measured on a 3,000-block, 1.2 MB tape** (the size the plan measures
+rendering with): the app encodes the blocks onto the wire for every call, so calls that the UI
+makes per row are the ones to watch.
+
+| | TypeScript | Rust core |
+|---|---|---|
+| `serializeTzx` of the whole tape | 4.7 ms | 7.4 ms |
+| `requiredVersion` (pane header, per render) | 0.1 ms | 1.6 ms |
+| `serializeBlock` × 3000 (one per row) | 5.8 ms | 12.3 ms |
+
+`requiredVersion` and `saveVersion` get a payload with the byte data left out — they provably
+only look at block types and entries, and the differential tests would catch a core that started
+reading data — which brought them from 8.5 ms to 1.6 ms. The per-row `serializeBlock` cost is
+`describe.ts` asking for a block's length; it disappears with module 2, which moves the whole
+list description into one call. The general answer is stage 4, where the tape stops crossing the
+boundary at all because it lives in Rust; until then, prefer one call per list over one per row.
 
 ## Stage 3 — Native shell skeleton (half a day)
 

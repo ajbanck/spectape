@@ -10,3 +10,4 @@ pub mod parser;
 pub mod types;
 pub mod wasm;
 pub mod wire;
+pub mod writer;

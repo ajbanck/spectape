@@ -8,7 +8,11 @@
 //! both with [`core_free`]. `src/tzx/core.ts` is the other end.
 
 use crate::parser::{parse_tap, parse_tape, parse_tzx, ParsedTape};
-use crate::wire::{encode_error, encode_tape, WIRE_VERSION};
+use crate::types::Block;
+use crate::wire::{
+    decode_blocks, encode_bytes, encode_error, encode_tap, encode_tape, encode_version, WIRE_VERSION,
+};
+use crate::writer::{required_version, save_version, serialize_block, serialize_tap, serialize_tzx, Version};
 use std::alloc::{alloc, dealloc, Layout};
 
 fn layout(len: usize) -> Layout {
@@ -83,6 +87,12 @@ unsafe fn respond(
         Ok(tape) => encode_tape(&tape),
         Err(message) => encode_error(&message),
     };
+    finish(payload)
+}
+
+/// Copy a payload into a buffer JavaScript can read: its `u32` length, then the
+/// payload itself.
+unsafe fn finish(payload: Vec<u8>) -> *mut u8 {
     let out = core_alloc(4 + payload.len());
     if out.is_null() {
         return out;
@@ -90,4 +100,94 @@ unsafe fn respond(
     std::ptr::copy_nonoverlapping((payload.len() as u32).to_le_bytes().as_ptr(), out, 4);
     std::ptr::copy_nonoverlapping(payload.as_ptr(), out.add(4), payload.len());
     out
+}
+
+/// Write the blocks as a TZX file. `major`/`minor` of `0xffff` means "use the
+/// lowest version these blocks need".
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_serialize_tzx(ptr: *const u8, len: usize, major: u32, minor: u32) -> *mut u8 {
+    let version = if major == 0xffff || minor == 0xffff {
+        None
+    } else {
+        Some(Version { major: major as u8, minor: minor as u8 })
+    };
+    with_blocks(ptr, len, |blocks| encode_bytes(&serialize_tzx(blocks, version)))
+}
+
+/// Write the blocks as a TAP file, with the indices of those left out.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_serialize_tap(ptr: *const u8, len: usize) -> *mut u8 {
+    with_blocks(ptr, len, |blocks| {
+        let (bytes, skipped) = serialize_tap(blocks);
+        encode_tap(&bytes, &skipped)
+    })
+}
+
+/// Write the blocks with no file header, ID byte and body each. For one block
+/// this is the block's own bytes, which is what the comparison and the size
+/// display need.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_serialize_blocks(ptr: *const u8, len: usize) -> *mut u8 {
+    with_blocks(ptr, len, |blocks| {
+        let mut out = Vec::new();
+        for b in blocks {
+            out.extend_from_slice(&serialize_block(b));
+        }
+        encode_bytes(&out)
+    })
+}
+
+/// The lowest TZX version that can represent these blocks.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_required_version(ptr: *const u8, len: usize) -> *mut u8 {
+    with_blocks(ptr, len, |blocks| {
+        let v = required_version(blocks);
+        encode_version(v.major, v.minor)
+    })
+}
+
+/// As [`core_required_version`], but never below the version the tape was
+/// loaded with. `0xffff` for a tape that was not loaded from a TZX file.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_save_version(
+    ptr: *const u8,
+    len: usize,
+    loaded_major: u32,
+    loaded_minor: u32,
+) -> *mut u8 {
+    let loaded = if loaded_major == 0xffff || loaded_minor == 0xffff {
+        None
+    } else {
+        Some(Version { major: loaded_major as u8, minor: loaded_minor as u8 })
+    };
+    with_blocks(ptr, len, |blocks| {
+        let v = save_version(blocks, loaded);
+        encode_version(v.major, v.minor)
+    })
+}
+
+/// Decode a block list from JavaScript, run `f` over it and lay the answer out
+/// the way [`respond`] does.
+unsafe fn with_blocks(ptr: *const u8, len: usize, f: impl Fn(&[Block]) -> Vec<u8>) -> *mut u8 {
+    let input: &[u8] = if ptr.is_null() || len == 0 { &[] } else { std::slice::from_raw_parts(ptr, len) };
+    let payload = match decode_blocks(input) {
+        Ok(blocks) => f(&blocks),
+        Err(e) => encode_error(&e.0),
+    };
+    finish(payload)
 }

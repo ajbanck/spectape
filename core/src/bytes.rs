@@ -92,3 +92,59 @@ pub fn latin1_to_string(b: &[u8]) -> String {
 pub fn string_to_latin1(s: &str) -> Vec<u8> {
     s.chars().map(|c| c as u32 as u8).collect()
 }
+
+/// Sequential little-endian writes, the port of `Writer` in `src/tzx/bytes.ts`.
+/// Widths wrap the way the TypeScript ones do, so an over-long block writes the
+/// same truncated length here as it did there.
+#[derive(Default)]
+pub struct Writer {
+    pub buf: Vec<u8>,
+}
+
+impl Writer {
+    pub fn new() -> Self {
+        Writer { buf: Vec::new() }
+    }
+
+    pub fn len(&self) -> usize {
+        self.buf.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.buf.is_empty()
+    }
+
+    pub fn u8(&mut self, v: u8) {
+        self.buf.push(v);
+    }
+
+    pub fn u16(&mut self, v: u16) {
+        self.buf.extend_from_slice(&v.to_le_bytes());
+    }
+
+    pub fn i16(&mut self, v: i16) {
+        self.u16(v as u16);
+    }
+
+    /// Low three bytes, as a TZX 24-bit length.
+    pub fn u24(&mut self, v: u32) {
+        self.buf.extend_from_slice(&v.to_le_bytes()[..3]);
+    }
+
+    pub fn u32(&mut self, v: u32) {
+        self.buf.extend_from_slice(&v.to_le_bytes());
+    }
+
+    pub fn bytes(&mut self, b: &[u8]) {
+        self.buf.extend_from_slice(b);
+    }
+
+    pub fn str(&mut self, s: &str) {
+        let b = string_to_latin1(s);
+        self.bytes(&b);
+    }
+
+    pub fn into_vec(self) -> Vec<u8> {
+        self.buf
+    }
+}
