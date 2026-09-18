@@ -71,7 +71,9 @@ impl Default for Settings {
     }
 }
 
-fn config_path() -> Option<PathBuf> {
+/// Where the app keeps what it remembers between runs: the settings, and the
+/// crash log `crashlog.rs` writes beside them.
+pub fn config_dir() -> Option<PathBuf> {
     #[cfg(not(target_os = "windows"))]
     let home = std::env::var_os("HOME").map(PathBuf::from);
     #[cfg(target_os = "macos")]
@@ -83,7 +85,11 @@ fn config_path() -> Option<PathBuf> {
         .map(PathBuf::from)
         .or_else(|| home.map(|h| h.join(".config")))
         .map(|c| c.join("spectape"));
-    dir.map(|d| d.join("native.conf"))
+    dir
+}
+
+fn config_path() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("native.conf"))
 }
 
 fn read_map() -> BTreeMap<String, String> {

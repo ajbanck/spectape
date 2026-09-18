@@ -879,6 +879,34 @@ draws, and one of them a real bug:
 None of this is behaviour, which is why stage 4's tests all still pass unchanged. It is the part
 of a port that only a picture can check, and the picture is now a command away.
 
+### A panic, and where panics go now
+
+Opening a tape with a group in it and then a shorter one from the pane's folder button killed the
+app: `index out of bounds: the len is 2 but the index is 5`. `App::frame` rebuilds the row caches
+early and draws afterwards, and two things run a command in between — the in-window menu bar, and
+the pane toolbar, whose Open button is a few lines above `list::show`. The load replaced the
+blocks while the cache still described the tape that had been open, so `visible_rows` walked the
+old rows and indexed the new blocks with them. It only reads `blocks[i]` for a row with a
+`range_end`, which is why it takes a group or a loop to show it. `list::show` refreshes the cache
+itself now, which is a generation comparison and costs nothing when nothing has moved.
+
+The macOS platform menu and the keyboard shortcuts were never affected: `handle_menu` and
+`handle_keys` both run before the refresh. That is also why the headless tests missed it — they
+load tapes *between* frames, never inside one, so a command that runs mid-frame is a shape the
+test layer still cannot reach on its own. Worth a seam, if another one of these turns up.
+
+What the episode actually cost was the hour before the line number. A Rust panic unwinds and exits
+101: macOS files no crash report for an exit, `~/Library/Logs/DiagnosticReports` stayed empty, and
+the unified log does not carry the stderr of an app launched from Finder. The report was "it
+terminates", and it took running the bundle's binary from a terminal to get `list.rs:159:46` —
+which a user on Windows could not have done at all, because `#![windows_subsystem = "windows"]`
+means there is no console. So `native/src/crashlog.rs` now installs a panic hook that writes the
+message, the location and a backtrace to `panic.log` beside the settings, and the About dialog
+names that file once it exists. The location survives stripping either way; the release profile
+keeps the symbol table (`strip = "debuginfo"`, 6.2 MB to 7.0 MB) so the backtrace names functions
+rather than repeating `__mh_execute_header`, which is the difference between knowing the line and
+knowing the call path that reached it.
+
 ## Total
 
 **Roughly a week of writing**, with shippable states throughout except during stage 4. The two

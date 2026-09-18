@@ -229,6 +229,13 @@ fn about_body(ui: &mut Ui, tok: &Tokens) -> Outcome {
     );
     ui.add_space(4.0);
     w::note(ui, tok, format!("Native shell {}", env!("CARGO_PKG_VERSION")));
+    // Only once there is one to name: a path here is an answer to "it quit and
+    // I do not know why", not a line of small print for everyone else.
+    if let Some(path) = crate::crashlog::path().filter(|p| p.exists()) {
+        ui.add_space(4.0);
+        let text = RichText::new(format!("Crash log: {}", path.display())).size(11.0).color(tok.muted);
+        ui.add(egui::Label::new(text).selectable(true));
+    }
     footer(ui, |ui| if ui.button("OK").clicked() { Outcome::Close } else { Outcome::Keep })
 }
 

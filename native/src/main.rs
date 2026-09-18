@@ -21,6 +21,7 @@
 mod actions;
 mod app;
 mod commands;
+mod crashlog;
 mod datawin;
 mod dialogs;
 mod editor;
@@ -243,6 +244,8 @@ fn window_icon() -> Option<egui::IconData> {
 }
 
 fn main() -> eframe::Result<()> {
+    // Before anything that could panic: a GUI app has nowhere to print one.
+    crashlog::install();
     let t0 = Instant::now();
     let opts = parse_args();
     let mut settings = Settings::load();
