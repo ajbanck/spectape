@@ -93,17 +93,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         }
         ui.separator();
 
-        let theme = app.store.settings.theme;
-        let icon = match theme {
-            crate::settings::Theme::Light => &icons::SUN,
-            crate::settings::Theme::Dark => &icons::MOON,
-            crate::settings::Theme::System => &icons::MONITOR,
-        };
-        if cell(ui, Some(icon), theme.name().into(), false, "Theme (click to change)", &tok) {
-            app.store.settings.theme = theme.next();
-            app.store.settings.save();
-        }
-        ui.separator();
+        // The theme switch lives at the right end of the menu bar, where
+        // `MenuBar.tsx` has always had it — not here as well.
 
         if app.progress.playing {
             progress(app, ui);

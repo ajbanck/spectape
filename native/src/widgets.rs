@@ -27,6 +27,46 @@ pub fn note(ui: &mut Ui, tok: &Tokens, text: impl Into<String>) {
     ui.label(RichText::new(text.into()).size(11.0).color(tok.muted));
 }
 
+/// The pane's L/R tag — the web's `.side-tag`: a rounded square that fills with
+/// the accent colour in the active pane, which is how a pane says it is the one
+/// the keyboard is talking to.
+pub fn side_tag(ui: &mut Ui, letter: &str, active: bool, tok: &Tokens) -> Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::hover());
+    let (fill, text) = if active { (tok.accent, tok.accent_text) } else { (tok.surface_3, tok.muted) };
+    ui.painter().rect_filled(rect, egui::CornerRadius::same(6), fill);
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        letter,
+        egui::FontId::proportional(11.0),
+        text,
+    );
+    response
+}
+
+/// An outlined pill, the web's `.ver`: used for the TZX version a tape will be
+/// saved as.
+pub fn pill(ui: &mut Ui, text: &str, tok: &Tokens) -> Response {
+    let font = egui::FontId::proportional(11.0);
+    let galley = ui.painter().layout_no_wrap(text.to_string(), font, tok.muted);
+    let size = galley.size() + egui::vec2(12.0, 2.0);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
+    ui.painter().rect_stroke(
+        rect,
+        egui::CornerRadius::same((size.y / 2.0) as u8),
+        egui::Stroke::new(1.0, tok.border),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, tok.muted);
+    response
+}
+
+/// The rule between two groups of toolbar buttons (`.vsep`).
+pub fn vsep(ui: &mut Ui, tok: &Tokens) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(9.0, 18.0), egui::Sense::hover());
+    ui.painter().vline(rect.center().x, rect.y_range().shrink(1.0), egui::Stroke::new(1.0, tok.border));
+}
+
 /// A number field honouring the Dec/Hex switch. Returns true when `value`
 /// changed this frame.
 #[allow(clippy::too_many_arguments)]

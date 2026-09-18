@@ -1,11 +1,16 @@
 //! The application menu, built from the table in `menutable.rs`.
 //!
-//! On macOS this is the platform's own menu bar: `muda` hangs it on `NSApp`, the
-//! same crate the Tauri shell reached through until stage 5, so the accelerators
-//! are the platform's too — `CmdOrCtrl+S` meaning ⌘S here.
+//! Two bars, from one table, and every platform gets the in-window one.
 //!
-//! Everywhere else the menu is drawn inside the window by egui from the same
-//! table, and `app.rs` handles the accelerators itself. **Including Windows**:
+//! On macOS `muda` additionally hangs the table on `NSApp`, the same crate the
+//! Tauri shell reached through until stage 5, so the accelerators are the
+//! platform's there — `CmdOrCtrl+S` meaning ⌘S. The **window** keeps its own bar
+//! as well: the app has had one since it was a web page in a window (it is the
+//! app in README.md's screenshot), and dropping it on macOS lost the Left and
+//! Right menus from where people had been using them.
+//!
+//! Everywhere else the in-window bar is the only one, and `app.rs` handles the
+//! accelerators itself. **Including Windows**:
 //! stage 5 tried `init_for_hwnd` there and it does not work with a winit window
 //! — the menu never appeared, a black strip took its place, and every click
 //! landed one menu-height away from what it hit, because a Win32 menu shrinks
@@ -19,8 +24,12 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::menutable::{MenuState, MENUS};
+use crate::menutable::{item, MenuState, WINDOW_MENUS};
 use crate::theme::Tokens;
+
+/// What the theme button reports; not a command id, because nothing but this
+/// bar has one to offer.
+pub const THEME: &str = "\0theme";
 
 #[derive(Default)]
 pub struct Queue(Arc<Mutex<Vec<String>>>);
@@ -35,7 +44,7 @@ impl Queue {
 #[cfg(target_os = "macos")]
 mod platform {
     use super::*;
-    use crate::menutable::Item;
+    use crate::menutable::{Item, MENUS};
     use muda::accelerator::Accelerator;
     use muda::{CheckMenuItem, Menu as MudaMenu, MenuItem, PredefinedMenuItem, Submenu};
 
@@ -157,60 +166,78 @@ mod platform {
     }
 }
 
-/// The menu bar egui draws inside the window, from the same table.
+/// The menu bar egui draws inside the window, grouped by pane.
 mod in_window {
     use super::*;
 
     pub struct Menu {
-        checked: std::cell::RefCell<Vec<bool>>,
+        /// Check marks, by command id, pushed each frame from the store.
+        checked: std::cell::RefCell<Vec<(&'static str, bool)>>,
         queue: Queue,
     }
 
     impl Menu {
         pub fn new() -> Menu {
-            Menu { checked: vec![false; crate::menutable::item_count()].into(), queue: Queue::default() }
+            Menu { checked: Vec::new().into(), queue: Queue::default() }
         }
 
         pub fn set_state(&self, _enabled: &[bool], checked: &[bool]) {
-            self.checked.replace(checked.to_vec());
+            let flat = crate::menutable::flat();
+            self.checked.replace(flat.iter().zip(checked).map(|(i, c)| (i.id, *c)).collect());
         }
 
         pub fn take_activated(&self) -> Vec<String> {
             self.queue.take()
         }
 
-        /// Returns the id clicked this frame, if any.
-        pub fn bar(&self, ui: &mut egui::Ui, state: &MenuState, tok: &Tokens) -> Option<String> {
+        /// Returns what was clicked: a command id and the pane it runs on.
+        pub fn bar(
+            &self,
+            ui: &mut egui::Ui,
+            states: &[MenuState; 2],
+            active: usize,
+            tok: &Tokens,
+        ) -> Option<(String, usize)> {
             let checked = self.checked.borrow();
             let mut fired = None;
             egui::MenuBar::new().ui(ui, |ui| {
-                // The base index of each menu is counted outside the button, because
-                // a closed menu never runs its closure.
-                let mut base = 0usize;
-                for menu in MENUS {
-                    let first = base;
-                    base += menu.items.len();
+                for menu in WINDOW_MENUS {
+                    let side = menu.side.unwrap_or(active);
+                    let state = &states[side];
                     ui.menu_button(menu.title, |ui| {
-                        for (k, item) in menu.items.iter().enumerate() {
-                            let at = first + k;
-                            if item.id.is_empty() {
+                        for id in menu.ids {
+                            if id.is_empty() {
                                 ui.separator();
                                 continue;
                             }
-                            let label = if item.check && checked[at] {
-                                format!("✓ {}", item.label)
+                            let Some(it) = item(id) else { continue };
+                            let on = checked.iter().find(|(i, _)| i == id).is_some_and(|(_, c)| *c);
+                            let label = if it.check && on {
+                                format!("✓ {}", it.label)
                             } else {
-                                item.label.to_string()
+                                it.label.to_string()
                             };
-                            let button = egui::Button::new(label).shortcut_text(crate::fmt::accel(item.keys));
-                            if ui.add_enabled(item.need.met(state), button).clicked() {
-                                fired = Some(item.id.to_string());
+                            let button = egui::Button::new(label).shortcut_text(crate::fmt::accel(it.keys));
+                            if ui.add_enabled(it.need.met(state), button).clicked() {
+                                fired = Some(((*id).to_string(), side));
                                 ui.close();
                             }
                         }
                     });
                 }
-                let _ = tok;
+                // The theme cycle sits at the right end of the bar, where
+                // `MenuBar.tsx` puts it. `theme` is not a command id — nothing
+                // else can reach it — so the caller reads it off the return.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let icon = match tok.theme_icon {
+                        0 => &crate::icons::SUN,
+                        1 => &crate::icons::MOON,
+                        _ => &crate::icons::MONITOR,
+                    };
+                    if crate::icons::button(ui, icon, "Theme (click to change)", true).clicked() {
+                        fired = Some((THEME.to_string(), active));
+                    }
+                });
             });
             fired
         }
@@ -219,10 +246,11 @@ mod in_window {
 
 /// Where this run's menu lives.
 pub enum Menu {
-    /// The platform's own bar, through muda. macOS only — see the note above.
+    /// The platform's own bar through muda, *and* the one in the window; macOS
+    /// has both, the way the app has always looked there.
     #[cfg(target_os = "macos")]
-    Platform(platform::Menu),
-    /// Drawn in the window by egui.
+    Platform { native: platform::Menu, bar: in_window::Menu },
+    /// Drawn in the window by egui, and nowhere else.
     InWindow(in_window::Menu),
     /// Neither: the frames the tests draw have no menu at all.
     Headless,
@@ -232,7 +260,7 @@ impl Menu {
     /// The menu this platform gets.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Menu {
         #[cfg(target_os = "macos")]
-        return Menu::Platform(platform::Menu::new(&cc.egui_ctx));
+        return Menu::Platform { native: platform::Menu::new(&cc.egui_ctx), bar: in_window::Menu::new() };
         #[cfg(not(target_os = "macos"))]
         {
             let _ = cc;
@@ -252,16 +280,19 @@ impl Menu {
         Menu::InWindow(in_window::Menu::new())
     }
 
-    /// Whether `bar` has anything to draw this frame.
+    /// Whether `bar` has anything to draw this frame: everything but a test.
     pub fn draws_in_window(&self) -> bool {
-        matches!(self, Menu::InWindow(_))
+        !matches!(self, Menu::Headless)
     }
 
     /// Push the enabled and checked state of every item.
     pub fn set_state(&self, enabled: &[bool], checked: &[bool]) {
         match self {
             #[cfg(target_os = "macos")]
-            Menu::Platform(m) => m.set_state(enabled, checked),
+            Menu::Platform { native, bar } => {
+                native.set_state(enabled, checked);
+                bar.set_state(enabled, checked);
+            }
             Menu::InWindow(m) => m.set_state(enabled, checked),
             Menu::Headless => {}
         }
@@ -271,17 +302,26 @@ impl Menu {
     pub fn take_activated(&self) -> Vec<String> {
         match self {
             #[cfg(target_os = "macos")]
-            Menu::Platform(m) => m.take_activated(),
+            Menu::Platform { native, .. } => native.take_activated(),
             Menu::InWindow(m) => m.take_activated(),
             Menu::Headless => Vec::new(),
         }
     }
 
-    /// Draw the in-window bar; `None` when the platform owns the menu.
-    pub fn bar(&self, ui: &mut egui::Ui, state: &MenuState, tok: &Tokens) -> Option<String> {
+    /// Draw the in-window bar and report what was clicked, with the pane it
+    /// belongs to: Left and Right run on their own tape.
+    pub fn bar(
+        &self,
+        ui: &mut egui::Ui,
+        states: &[MenuState; 2],
+        active: usize,
+        tok: &Tokens,
+    ) -> Option<(String, usize)> {
         match self {
-            Menu::InWindow(m) => m.bar(ui, state, tok),
-            _ => None,
+            #[cfg(target_os = "macos")]
+            Menu::Platform { bar, .. } => bar.bar(ui, states, active, tok),
+            Menu::InWindow(m) => m.bar(ui, states, active, tok),
+            Menu::Headless => None,
         }
     }
 }

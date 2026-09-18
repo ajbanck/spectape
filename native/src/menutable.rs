@@ -70,6 +70,9 @@ pub struct Item {
 }
 
 pub struct MenuDef {
+    /// Only the platform bar (muda, macOS) groups by these; the window bar has
+    /// its own titles in `WINDOW_MENUS`.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub title: &'static str,
     pub items: &'static [Item],
 }
@@ -177,6 +180,100 @@ pub const MENUS: &[MenuDef] = &[
             cmd("about", "About SpecTape…", "", Always),
         ],
     },
+];
+
+/// How the **window's** menu bar groups the same commands: by pane, the way
+/// `MenuBar.tsx` does — Left and Right each run on their own tape, which is what
+/// the two menus mean. The platform bar above keeps File/Edit/Tape, because that
+/// is what macOS expects of a menu bar and because an accelerator can only belong
+/// to one item: ⌘Z there is the active pane's, not the left one's.
+pub struct WindowMenu {
+    pub title: &'static str,
+    /// The pane its commands run on; `None` means whichever is active.
+    pub side: Option<usize>,
+    /// Command ids, `""` for a separator. Every one is an item of `MENUS`.
+    pub ids: &'static [&'static str],
+}
+
+/// The per-pane list both Left and Right are built from (`tapeMenu` in
+/// `MenuBar.tsx`).
+const TAPE_IDS: &[&str] = &[
+    "new",
+    "open",
+    "open-other",
+    "insert-file",
+    "",
+    "save",
+    "save-as",
+    "save-tap",
+    "export-wav",
+    "",
+    "play",
+    "play-cursor",
+    "play-selection",
+    "stop",
+    "",
+    "emu-tape",
+    "",
+    "programs",
+    "tape-info",
+    "consistency",
+    "compare",
+    "clear-compare",
+    "",
+    "undo",
+    "redo",
+    "select-all",
+];
+
+pub const WINDOW_MENUS: &[WindowMenu] = &[
+    WindowMenu { title: "Left", side: Some(0), ids: TAPE_IDS },
+    WindowMenu { title: "Right", side: Some(1), ids: TAPE_IDS },
+    WindowMenu {
+        title: "Block",
+        side: None,
+        ids: &[
+            "insert",
+            "view-data",
+            "view-as-one",
+            "",
+            "cut",
+            "copy",
+            "paste",
+            "duplicate",
+            "delete",
+            "",
+            "move-up",
+            "move-down",
+            "group",
+            "collapse-all",
+            "expand-all",
+            "",
+            "select-program",
+            "extract",
+            "",
+            "emu-cursor",
+            "emu-selection",
+            "",
+            "find-match",
+            "set-timings",
+        ],
+    },
+    WindowMenu {
+        title: "Options",
+        side: None,
+        ids: &[
+            "toggle-hex",
+            "opt-hex-bytes",
+            "opt-zero-based",
+            "",
+            "switch-pane",
+            "toggle-lock",
+            "",
+            "emu-settings",
+        ],
+    },
+    WindowMenu { title: "Help", side: None, ids: &["shortcuts", "about"] },
 ];
 
 /// Flat index of every item, the order `menu.rs` addresses them in.

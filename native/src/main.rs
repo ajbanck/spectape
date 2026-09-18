@@ -70,6 +70,8 @@ struct Opts {
     screenshot: Option<String>,
     /// Which row the screenshot has the cursor on.
     cursor: Option<i32>,
+    /// `light`, `dark` or `system`: which theme to draw, for comparing the two.
+    theme: Option<String>,
 }
 
 fn parse_args() -> Opts {
@@ -82,6 +84,7 @@ fn parse_args() -> Opts {
         hex: false,
         screenshot: None,
         cursor: None,
+        theme: None,
     };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -93,6 +96,7 @@ fn parse_args() -> Opts {
             "--hex" => o.hex = true,
             "--screenshot" => o.screenshot = args.next(),
             "--cursor" => o.cursor = args.next().and_then(|v| v.parse().ok()),
+            "--theme" => o.theme = args.next(),
             "-h" | "--help" => {
                 println!("spectape [TAPE…] [--rows N] [--bench N] [--exit-on-draw] [--measure] [--hex]");
                 std::process::exit(0);
@@ -273,11 +277,20 @@ fn main() -> eframe::Result<()> {
             }
             None => (spec, (1100.0, 720.0)),
         };
+        if let Some(name) = opts.theme.as_deref() {
+            store.settings.theme = match name {
+                "light" => settings::Theme::Light,
+                "dark" => settings::Theme::Dark,
+                _ => settings::Theme::System,
+            };
+        }
         if let Some(at) = opts.cursor {
             store.set_cursor(0, at, state::SelectMode::Single);
         }
         let ctx = egui::Context::default();
-        let mut app = app::App::build(&ctx, menu::Menu::headless(), store, t0, 0, false);
+        // The in-window bar, not the headless menu a test draws with: a
+        // screenshot should show the window the way the window looks.
+        let mut app = app::App::build(&ctx, menu::Menu::in_window(), store, t0, 0, false);
         let canvas = shot::capture(&ctx, &mut app, size, 3);
         std::fs::write(&path, canvas.to_png()).expect("write the screenshot");
         println!("{path}: {}×{}", canvas.width, canvas.height);
@@ -333,6 +346,7 @@ mod tests {
             hex: false,
             screenshot: None,
             cursor: None,
+            theme: None,
         }
     }
 

@@ -681,8 +681,11 @@ to offer is closed — do not reopen it. What that leaves is a working practice 
 when a feature is added, it goes into the native app, and into the browser one only if it earns its
 place there. The core protects the expensive half either way — parsing, descriptions, consistency,
 audio, BASIC and the disassembler are shared — so what can diverge is UI only, and the two already
-have (the native theme switch sits in the status bar, the web one in the menu bar; `?open=&right=`
-is argv on the native side). Parity is pinned where it matters, against `commands.ts`, by
+have (`?open=&right=` is argv on the native side, and the macOS build has a platform menu bar the
+browser cannot). Where they diverged by accident rather than by platform, though, the web build is
+the reference: it is the app in README.md's screenshot, and the native one was measured against it
+after stage 5 — the window's menu bar, its Left/Right grouping, the theme switch at the right end
+of it, the L/R tag, the version pill and the toolbar rule all came back that way. Parity is pinned where it matters, against `commands.ts`, by
 `native/tests/menu.rs`.
 
 ### What stage 5 did

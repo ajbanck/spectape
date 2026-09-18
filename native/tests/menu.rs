@@ -121,6 +121,30 @@ fn every_command_is_in_the_menu() {
     }
 }
 
+/// The window bar is a second grouping of the same table (Left/Right per pane,
+/// the way `MenuBar.tsx` groups them), so every id it lists has to be an item of
+/// `MENUS` — otherwise it would show a command the platform bar cannot.
+#[test]
+fn the_window_menus_only_show_commands_the_table_has() {
+    let mut shown = 0;
+    for menu in WINDOW_MENUS {
+        for id in menu.ids {
+            if id.is_empty() {
+                continue;
+            }
+            assert!(item(id).is_some(), "the {} menu shows {id:?}, which is not in the table", menu.title);
+            shown += 1;
+        }
+    }
+    assert!(shown > 40, "only {shown} commands in the window bar");
+
+    // Left and Right are the same list; what differs is the pane they run on.
+    let sides: Vec<Option<usize>> = WINDOW_MENUS.iter().map(|m| m.side).collect();
+    assert_eq!(sides[0], Some(0));
+    assert_eq!(sides[1], Some(1));
+    assert_eq!(WINDOW_MENUS[0].ids, WINDOW_MENUS[1].ids);
+}
+
 #[test]
 fn ids_are_unique_and_flat_order_is_stable() {
     let items = flat();

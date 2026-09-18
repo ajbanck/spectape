@@ -36,6 +36,9 @@ pub struct Tokens {
     pub ignored: Color32,
     /// `category()` in `src/ui/TapePane.tsx`: data, signal, flow, struct, info, unknown.
     pub cat: [Color32; 6],
+    /// Which icon the theme button shows: 0 sun, 1 moon, 2 follow the system.
+    /// A token because the bar that draws it has no other route to the setting.
+    pub theme_icon: u8,
 }
 
 pub const LIGHT: Tokens = Tokens {
@@ -60,6 +63,7 @@ pub const LIGHT: Tokens = Tokens {
     match_: rgb(0x16a34a),
     ignored: rgb(0xa0a8b6),
     cat: [rgb(0x2f6fed), rgb(0x0e9f9f), rgb(0xd97706), rgb(0x7c3aed), rgb(0x64748b), rgb(0xb91c1c)],
+    theme_icon: 2,
 };
 
 pub const DARK: Tokens = Tokens {
@@ -86,6 +90,7 @@ pub const DARK: Tokens = Tokens {
     match_: rgb(0x4ade80),
     ignored: rgb(0x5e6878),
     cat: [rgb(0x6b9cff), rgb(0x2dd4bf), rgb(0xfbbf24), rgb(0xa78bfa), rgb(0x94a3b8), rgb(0xf87171)],
+    theme_icon: 2,
 };
 
 impl Tokens {
@@ -156,7 +161,7 @@ pub fn latin_only_fonts() -> egui::FontDefinitions {
 /// The tokens for the chosen theme; `System` follows what egui was told about
 /// the desktop's preference.
 pub fn tokens(theme: crate::settings::Theme, system_dark: bool) -> Tokens {
-    match theme {
+    let mut tok = match theme {
         crate::settings::Theme::Light => LIGHT,
         crate::settings::Theme::Dark => DARK,
         crate::settings::Theme::System => {
@@ -166,5 +171,13 @@ pub fn tokens(theme: crate::settings::Theme, system_dark: bool) -> Tokens {
                 LIGHT
             }
         }
-    }
+    };
+    // The setting, not the colours it resolved to: "follow the system" is a
+    // third state the palette cannot say.
+    tok.theme_icon = match theme {
+        crate::settings::Theme::Light => 0,
+        crate::settings::Theme::Dark => 1,
+        crate::settings::Theme::System => 2,
+    };
+    tok
 }

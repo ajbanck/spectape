@@ -402,24 +402,26 @@ impl App {
     fn pane_head(&mut self, ui: &mut Ui, side: Side) {
         let tok = self.tokens;
         let mut run: Option<&'static str> = None;
+        let active = self.store.active == side;
         ui.horizontal(|ui| {
             ui.add_space(6.0);
+            // The web's .pane-title gap; the toolbar below sets its own.
+            ui.spacing_mut().item_spacing.x = 8.0;
             let t = self.store.tape(side);
-            ui.label(RichText::new(if side == 0 { "L" } else { "R" }).size(10.0).color(tok.faint));
+            crate::widgets::side_tag(ui, if side == 0 { "L" } else { "R" }, active, &tok);
             ui.label(RichText::new(&t.name).size(13.0).strong());
             if t.dirty() {
-                icons::inline(ui, &icons::DOT, tok.accent, 8.0).on_hover_text("Unsaved changes");
+                icons::inline(ui, &icons::DOT, tok.warn, 8.0).on_hover_text("Unsaved changes");
             }
             if !t.blocks.is_empty() {
                 let v = required_version(&t.blocks);
-                ui.label(
-                    RichText::new(format!("TZX {}.{:02}", v.major, v.minor)).size(10.0).color(tok.muted),
-                )
-                .on_hover_text("TZX version this tape will be saved as");
+                crate::widgets::pill(ui, &format!("TZX {}.{:02}", v.major, v.minor), &tok)
+                    .on_hover_text("TZX version this tape will be saved as");
             }
             // Right to left, so the order here is the reverse of the web
             // toolbar's: folder, save, insert, play, programs, info.
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 2.0; // the web's .toolbar gap
                 let has = !self.store.tape(side).blocks.is_empty();
                 if icons::button(ui, &icons::INFO, "Tape info…", has).clicked() {
                     run = Some("tape-info");
@@ -439,6 +441,8 @@ impl App {
                 if icons::button(ui, &icons::PLUS, "Insert block…", true).clicked() {
                     run = Some("insert");
                 }
+                // Right to left: the rule the web draws between save and insert.
+                crate::widgets::vsep(ui, &tok);
                 let save_hover = if self.store.tape(side).path.is_some() { "Save" } else { "Save as TZX" };
                 if icons::button(ui, &icons::SAVE, save_hover, has).clicked() {
                     run = Some("save");
@@ -551,14 +555,22 @@ impl App {
         // Where the platform takes a menu bar it is muda's; otherwise it is drawn
         // here, from the same table.
         if self.menu.draws_in_window() {
-            let side = self.store.active;
-            let state = commands::menu_state(self, side);
+            let active = self.store.active;
+            // One state per pane: the Left menu greys out on the left tape's
+            // blocks even while the right one is active.
+            let states = [commands::menu_state(self, 0), commands::menu_state(self, 1)];
             let mut fired = None;
             egui::Panel::top("menubar").show(ui, |ui| {
-                fired = self.menu.bar(ui, &state, &self.tokens);
+                fired = self.menu.bar(ui, &states, active, &self.tokens);
             });
-            if let Some(id) = fired {
-                commands::run(self, &id, side);
+            if let Some((id, side)) = fired {
+                if id == crate::menu::THEME {
+                    self.store.settings.theme = self.store.settings.theme.next();
+                    self.store.settings.save();
+                } else {
+                    commands::run(self, &id, side);
+                    self.scroll_to_cursor(side);
+                }
             }
         }
 

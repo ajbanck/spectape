@@ -1,6 +1,6 @@
 [package]
 name = "spectape-native"
-version = "0.3.0"
+version = "0.3.2"
 description = "SpecTape, the desktop app: egui on the Rust tape core"
 license = "GPL-2.0-or-later"
 edition = "2021"
