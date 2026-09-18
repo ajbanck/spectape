@@ -14,3 +14,4 @@ src-tauri/gen
 !public/samples/*.tzx
 !public/samples/*.tap
 .DS_Store
+src/tzx/core.wasm.ts

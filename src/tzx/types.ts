@@ -194,6 +194,14 @@ export type Block =
 
 export type DataBlock = StandardBlock | TurboBlock | PureDataBlock | GeneralizedBlock | DirectBlock;
 
+/** What a parse returns: the blocks, the file's TZX version and any complaints. */
+export interface ParsedTape {
+  blocks: Block[];
+  major: number;
+  minor: number;
+  warnings: string[];
+}
+
 let nextUid = 1;
 export function newUid(): number {
   return nextUid++;

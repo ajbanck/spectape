@@ -18,5 +18,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // Instantiates the wasm tape core before the first test parses a tape.
+    setupFiles: ['./test/setup.ts'],
   },
 });

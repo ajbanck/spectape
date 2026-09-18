@@ -19,14 +19,14 @@ jobs:
           # Universal macOS binary; the app declares macOS 10.13+ and needs Safari 14.1's WebKit or newer.
           - os: macos-latest
             args: --target universal-apple-darwin
-            targets: aarch64-apple-darwin,x86_64-apple-darwin
+            targets: aarch64-apple-darwin,x86_64-apple-darwin,wasm32-unknown-unknown
           # Oldest supported LTS: sets the glibc floor and ships webkit2gtk 4.1.
           - os: ubuntu-22.04
             args: ''
-            targets: ''
+            targets: wasm32-unknown-unknown
           - os: windows-latest
             args: ''
-            targets: ''
+            targets: wasm32-unknown-unknown
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -42,7 +42,9 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            core
 
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-22.04'

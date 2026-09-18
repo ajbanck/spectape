@@ -15,7 +15,15 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # The tape core is Rust compiled to wasm, and the npm scripts build it.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: core
       - run: npm ci
+      - run: npm run core:test
       - run: npm run typecheck
       - run: npm test
       - run: npm run build

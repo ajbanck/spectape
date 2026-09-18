@@ -83,19 +83,62 @@ Three things learned that change the later stages:
    string that reaches a UI or a file has to go back through `string_to_latin1`. Worth watching in
    stage 2, where `describe.ts` and the BASIC lister live.
 
-## Stage 1 — Rust core behind the existing app (half a day)
+## Stage 1 — Rust core behind the existing app (half a day) — **done, gate passed**
 
 Compile `core/` to WebAssembly and have the current TypeScript call it. `src/tzx/parser.ts`
 becomes a thin wrapper over the wasm export, with the same signature, so nothing above it
 changes. Both the web build and the Tauri build get it.
 
-Run old and new implementations side by side in the test suite (differential testing: same input,
-assert identical output) until they agree on every fixture, then delete the TypeScript body.
+Done on 2026-09-18. `src/tzx/parser.ts` is now 40 lines: `isTzx` and `bitsPerSymbol` (still
+needed by the writer, the audio renderer and the consistency check, and moving with them in
+stage 2) plus three calls into the core. The old implementation is frozen as
+`test/reference/parser.ts`, the way the audio tests keep the original sample sink, and
+`test/core.test.ts` runs the two against each other: the sample tapes, every creatable block
+type, Latin-1 text and entries, select/call blocks, TAP edge cases and eight damaged TZX files.
+61 TypeScript tests and 13 Rust tests pass, and `npm run smoke` drives the real UI on tapes
+parsed by the core.
 
-**Ships.** The app is unchanged for users; the parser is now Rust.
+**No wasm-bindgen.** The interface is a byte buffer in and a byte buffer out, so the module loads
+with a plain `WebAssembly.instantiate` and needs no generated glue and no extra build tool:
 
-**Gate:** wasm adds 200–400 KB to the web bundle. Acceptable? Startup must not regress past the
-355 ms baseline.
+- `core/src/wasm.rs` exports `core_alloc`, `core_free`, `core_parse_tape`, `core_parse_tzx`,
+  `core_parse_tap` and `core_wire_version` over the C ABI. JavaScript owns both buffers.
+- `core/src/wire.rs` encodes a parsed tape as a flat little-endian byte format and
+  `src/tzx/wire.ts` decodes it into the same block objects as before, key order included.
+  Both ends are about 150 lines and version-checked against each other at startup.
+- `scripts/build-wasm.mjs` builds the crate and writes `src/tzx/core.wasm.ts`, the module
+  base64-inlined. `predev`, `prebuild`, `pretest` and `pretypecheck` run it, and the file is
+  generated, not tracked.
+
+Measured on 2026-09-18:
+
+| | before | after |
+|---|---|---|
+| Main JS bundle | 187.56 kB (65.12 kB gzip) | 253.20 kB (92.71 kB gzip) |
+| wasm module | — | 49,438 bytes (19.1 kB gzipped on its own) |
+| Instantiate at startup | — | 0.2 ms |
+| Parse of the 7.6 kB demo tape | — | 0.02 ms |
+
+**Gate answers.** The bundle grew by 66 kB raw and 28 kB gzip — a sixth of the 200–400 kB the
+plan budgeted, because there is no bindgen glue and the release profile is built for size
+(`opt-level = "z"`, LTO, one codegen unit, `panic = "abort"`). Startup gains one 0.2 ms
+instantiation against a 355 ms baseline, so the 355 ms stands; the desktop cold start is worth
+one confirming run on the real app. **Continue.**
+
+Four things worth knowing before stage 2:
+
+1. Compiling wasm is asynchronous, but the app parses synchronously. `initCore()` runs once
+   before the first render (`src/main.tsx`) and in `test/setup.ts`; the parse functions throw a
+   clear error if something calls them earlier. Top-level `await` would have been tidier but
+   Safari 14.1 does not have it, so it is a callback.
+2. Inlining the module as base64 costs about 8.5 kB gzip over serving a separate `.wasm` asset.
+   It buys one code path for the browser, the Tauri webview and vitest under node, and no second
+   request at startup. Revisit if the core grows by an order of magnitude.
+3. The Rust differential fixtures are now dumped from `test/reference/parser.ts`, not from
+   `src/tzx/parser.ts` — otherwise the core would be checking itself.
+4. The toolchain note in CLAUDE.md was wrong: rustup *is* installed, at `~/.cargo/bin`, with the
+   wasm32 target; it is only missing from `PATH`, where Homebrew's cargo (host target only) wins.
+   `scripts/build-wasm.mjs` prefers the rustup shim, and both CI workflows now install the target.
 
 ## Stage 2 — The rest of the logic (1–2 days)
 
