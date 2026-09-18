@@ -12,17 +12,31 @@ The plan is staged so that **the app stays shippable after every stage**, and so
 expensive decision (rewriting 2,223 lines of UI) is taken only after the cheap half has proven
 the conversion rate.
 
-## Where we start
+## Where we start — and where it ended
 
-Measured on 2026-09-17, warm launch, release build:
+Warm launch, release build, same machine: the Tauri app on 2026-09-17, the native one on
+2026-09-18 (arm64, `SpecTape.app`).
 
-| | today |
-|---|---|
-| Cold start (window drawn) | 355 ms, of which ~150 ms is WKWebView creation |
-| Cursor move, 200-block tape | at the frame floor, nothing to fix |
-| Cursor move, 3000-block tape | 76–90 ms, ~90% our own render |
-| Desktop download | 3.6 MB macOS, 1.3 MB Windows, 76 MB Linux AppImage |
-| Runtime dependency | system webview on all three platforms |
+| | Tauri | native |
+|---|---|---|
+| Cold start (window drawn) | 355 ms, of which ~150 ms is WKWebView creation | **161 ms** to the first frame (0.26 s for the whole process, `--exit-on-draw`) |
+| Cursor move, 200-block tape | at the frame floor, nothing to fix | same |
+| Cursor move, 3000-block tape | 76–90 ms, ~90% our own render | **0.27 ms median** (min 0.08, max 1.5) of our own frame build |
+| Desktop download | 3.6 MB macOS, 1.3 MB Windows, 76 MB Linux AppImage | 3.4 MB macOS dmg (arm64), 6.2 MB binary; Linux and Windows are CI's first run to weigh |
+| Runtime dependency | system webview on all three platforms | none |
+
+Two things the numbers say that the plan guessed at:
+
+- **Cold start is process start, window and GL context**, exactly as stage 4 predicted when it
+  found the app's own first frame costs 4–6 ms headless. 161 ms is what is left after the web view
+  goes; the remaining ~155 ms is dyld, `NSApplication` and the GL context, none of it ours. The
+  target in the goal above was ~100 ms, so this lands near it without anything left in the repo to
+  cut.
+- **The list is no longer the frame.** What used to be 76–90 ms of our own rendering is 0.27 ms,
+  because the rows are built once per version of the tape and the list is virtualised. During the
+  bench the *whole* frame sits at ~12 ms, which is the display's pace with a repaint requested
+  every frame, not work — with one outlier per run (62–155 ms) in the first frames, where the
+  window and the font atlas are still arriving.
 
 Line counts to port:
 
@@ -422,7 +436,7 @@ this stage is a build-and-report loop with the person at the keyboard.
 — ids, labels, shortcuts, enabled rules — and `src-tauri/src/menu.rs` already builds a native menu
 from the same ids. Stage 3 only needs enough of it to judge the feel: the real port is stage 4.
 
-## Stage 4 — Feature parity, area by area — **done; two numbers still owed**
+## Stage 4 — Feature parity, area by area — **done**
 
 Port `src/state` into Rust as you go; each area is done when it matches the current app:
 
@@ -753,17 +767,16 @@ it is developed.
 
 ## Stage 6 — Cleanup (an hour)
 
-Re-measure the numbers in "Where we start" and finish what only a real machine can answer. The
-dead TypeScript and CI were done in stage 5, because neither could wait for it.
+Finish what only a real machine can answer. The dead TypeScript and CI were done in stage 5,
+because neither could wait for it, and "Where we start" was re-measured on 2026-09-18.
 
 ### Starting stage 6
 
 What is left is small and, unusually for this plan, mostly *not* code:
 
-- **The two numbers.** Still owed, still the person's: cold start (`time … --exit-on-draw`,
-  baseline 355 ms) and a 3,000-row cursor move (`--rows 3000 --bench 200`, baseline 76–90 ms).
-  `npm run desktop` prints both commands. Until they are read off a running window, "Where we
-  start" cannot be re-measured, which is stage 6's headline task.
+- **The two numbers are in** (2026-09-18, read off the bundle): 161 ms cold start against 355 ms,
+  and 0.27 ms against 76–90 ms for a cursor move on 3,000 rows. Both are in the table at the top of
+  this file, with what they mean. Nothing is owed on the measuring side any more.
 - **A real Windows and a real Linux run.** CI builds and tests both, but nobody has yet clicked the
   platform menu on Windows, installed the `.msi` and double-clicked a `.tzx`, or run the AppImage.
   The first tag, or a `workflow_dispatch` run, produces all of it.
