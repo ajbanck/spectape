@@ -36,7 +36,9 @@ Two things the numbers say that the plan guessed at:
   5.6 MB, because the AppImage no longer carries WebKitGTK. macOS doubled (3.6 → 7.1 MB, and it is
   universal now) and Windows went from 1.3 MB to 7.3 MB, which is the trade: the UI is in the
   binary instead of borrowed from the system, and on Windows that is what removes the WebView2
-  dependency altogether. Sizes from the first full packaging run, 2026-09-18.
+  dependency altogether. Sizes from the first full packaging run, 2026-09-18 — each about 0.8 MB
+  low now, because the release profile keeps the symbol table for the crash log (see "A panic, and
+  where panics go now"). Re-measure on the next packaging run.
 - **The list is no longer the frame.** What used to be 76–90 ms of our own rendering is 0.27 ms,
   because the rows are built once per version of the tape and the list is virtualised. During the
   bench the *whole* frame sits at ~12 ms, which is the display's pace with a repaint requested
@@ -840,10 +842,12 @@ What is left is small and, unusually for this plan, mostly *not* code:
 
 ### The parity sweep
 
-One `--screenshot` of the two sample tapes against `scratch/01-main.png` — the smoke test's own
-picture, which `docs/screenshot-main.png` is a slightly older copy of (it predates the Programs
-button). Twenty-odd divergences from `src/ui/`, every one of them invisible to a test that only
-draws, and one of them a real bug:
+One `--screenshot` of the two sample tapes against `scratch/01-main.png`, the smoke test's own
+picture. `docs/screenshot-main.png` was a stage-4 copy of it and had gone stale — it predated the
+Programs button, so the reference showed five toolbar icons where the app has six; it has been
+refreshed from a smoke run, and the way to keep it current is `npm run smoke` and a copy.
+Twenty-odd divergences from `src/ui/`, every one of them invisible to a test that only draws, and
+one of them a real bug:
 
 - **The editor's row buttons and its footer were off the pane.** A `TextEdit` asking for
   `desired_width(INFINITY)` with buttons after it does not clip in egui: it *widens the enclosing
