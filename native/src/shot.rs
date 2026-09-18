@@ -116,12 +116,10 @@ impl Textures {
 pub fn paint(canvas: &mut Canvas, textures: &Textures, primitives: &[ClippedPrimitive]) {
     for ClippedPrimitive { clip_rect, primitive } in primitives {
         let Primitive::Mesh(mesh) = primitive else { continue };
-        for triangle in mesh.indices.chunks_exact(3) {
-            let v = [
-                &mesh.vertices[triangle[0] as usize],
-                &mesh.vertices[triangle[1] as usize],
-                &mesh.vertices[triangle[2] as usize],
-            ];
+        for t in 0..mesh.indices.len() / 3 {
+            let i = &mesh.indices[t * 3..t * 3 + 3];
+            let v =
+                [&mesh.vertices[i[0] as usize], &mesh.vertices[i[1] as usize], &mesh.vertices[i[2] as usize]];
             fill(canvas, textures, mesh.texture_id, v, *clip_rect);
         }
     }
