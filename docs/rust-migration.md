@@ -422,7 +422,7 @@ this stage is a build-and-report loop with the person at the keyboard.
 — ids, labels, shortcuts, enabled rules — and `src-tauri/src/menu.rs` already builds a native menu
 from the same ids. Stage 3 only needs enough of it to judge the feel: the real port is stage 4.
 
-## Stage 4 — Feature parity, area by area (2–4 days of writing, plus your testing)
+## Stage 4 — Feature parity, area by area — **done; two numbers still owed**
 
 Port `src/state` into Rust as you go; each area is done when it matches the current app:
 
@@ -478,30 +478,36 @@ one starts from, the way stages 0–3 did.
 Every id in `COMMANDS` (`src/state/commands.ts`), which is the complete list of what the app does.
 An area is done when its ids work the way the web app works them, including the enabled rules.
 
-**1. Block list** — selection semantics, collapsed groups as one unit (`unitIndices`), drag & drop,
-cursor, the `.playing` marker:
+All six are done. The checklist is no longer a list to keep by hand either: `tests/menu.rs` reads
+`commands.ts` and fails if an id or an enabled rule drifts, and `commands.rs`'s own test runs every
+id that does not reach outside the process.
+
+**1. Block list — done.** Selection semantics, collapsed groups as one unit (`unitIndices`),
+drag & drop, cursor, the `.playing` marker:
 `select-all` · `move-up` · `move-down` · `group` · `toggle-collapse` · `collapse-all` ·
 `expand-all` · `select-program` · `extract` · `switch-pane` · `toggle-lock` · `delete` ·
 `duplicate` · `cut` · `copy` · `paste` · `insert` · `undo` · `redo`
 
-**2. Block editor** — per-type forms, Commit/Revert, the footer that spells out
+**2. Block editor — done.** Per-type forms, Commit/Revert, the footer that spells out
 "Block length N bytes: flag + M data + checksum":
 `view-data` · `view-as-one` · `set-timings` · `insert-file`
 
-**3. Data window** — hex, screen, BASIC, vars, text, disassembly; the per-byte character table is
-`spectrum::charset::char_table`, and the views are virtualized lists of rows:
+**3. Data window — done.** Hex, screen, BASIC, vars, text, disassembly, plus the bit and byte
+edits, the search, the last-byte mask and Append/Replace/Save file; the views are virtualised lists:
 (no command ids of its own; driven by `view-data`)
 
-**4. Dialogs, status bar, options**:
+**4. Dialogs, status bar, options — done** (the status bar also carries the theme switch the web
+menu bar has):
 `programs` · `tape-info` · `consistency` · `compare` · `clear-compare` · `find-match` ·
 `toggle-hex` · `opt-hex-bytes` · `opt-zero-based` · `emu-settings` · `shortcuts` · `about`
 
-**5. Playback** — `cpal` output, the progress indicator driven by `playing`, `playingSide`,
-`playingBlock` and `playPos`; `positionAt` stays a binary search on the caller's array:
+**5. Playback — done.** `cpal` output at the device's own rate, the progress indicator read off one
+`Progress` instead of four signals; `positionAt` stays a binary search on the caller's array:
 `play` · `play-cursor` · `play-selection` · `stop` · `export-wav`
 
-**6. Files** — `rfd` dialogs, the "open with" queue, file associations, and the emulator launch
-that already exists in `src-tauri/src/emulator.rs`:
+**6. Files — done, except one path.** `rfd` dialogs, tapes named on the command line, files dropped
+on a pane, and the emulator launch copied from `src-tauri/src/emulator.rs`. The bundle declares the
+TZX/TAP document types, but the Apple Event macOS sends to an already-running app is not wired:
 `new` · `open` · `open-other` · `save` · `save-as` · `save-tap` · `emu-tape` · `emu-cursor` ·
 `emu-selection`
 
@@ -515,6 +521,91 @@ does, which makes "are we done" answerable rather than a feeling.
 
 **Not shipped until the checklist is complete.** This is the only long stretch without a release;
 it is unavoidable, because a half-ported UI is worse than either side.
+
+### What stage 4 built
+
+Done on 2026-09-18. `native/` is the whole app now: two tape panes with their editors, the block
+list with its selection semantics, the data window, every dialog, the status bar, playback through
+`cpal` and files through `rfd`. 7,400 lines of Rust in 21 modules plus 700 of tests, against the
+3,300 lines of TypeScript in `src/state/` and `src/ui/` they replace — the difference is mostly
+the forms, which say in Rust what JSX says in markup.
+
+| | |
+|---|---|
+| `src/state.rs` | the store: two tapes, cursor, selection, collapse, clipboard, undo, compare |
+| `src/commands.rs` | every command id, dispatched; the context menu; the key table |
+| `src/actions.rs` | the higher-level actions, and `Then`, a named follow-up where the web has a closure |
+| `src/list.rs` | the block list: rows, collapsing, drag & drop, the consistency marks |
+| `src/editor.rs` | the 25 per-type forms over a draft `Body`, with Commit/Revert |
+| `src/datawin.rs` | dump, screen, BASIC, variables, text, disassembly, and the bit/byte edits |
+| `src/dialogs.rs` | insert, tape info, consistency, WAV export, programs, emulator, about, confirm |
+| `src/statusbar.rs` · `src/menu.rs` · `src/menutable.rs` | the bars, and the one command table |
+| `src/player.rs` · `src/tape.rs` | cpal output; zlib for Z-RLE CSW and the `positionAt` search |
+| `src/files.rs` · `src/settings.rs` · `src/emulator.rs` | rfd, the options file, the emulator launch |
+| `src/widgets.rs` · `src/theme.rs` · `src/fmt.rs` · `src/tables.rs` | fields, tokens, formats, labels |
+
+Four things worth knowing:
+
+1. **`dirty` is a generation number, not object identity.** The web store compares `snap.blocks !==
+   t.saved`; every version of the blocks array here carries a counter instead, so undoing back to
+   the saved version clears the dot exactly as it does on the web, and redoing sets it again.
+2. **A dialog's "OK" is a value, not a closure.** `confirmDiscard(side, () => …)` would have to
+   capture the store it is about to mutate. `Then` names the follow-up instead — `Then::ExtractGo`,
+   `Then::EmulatorGo` — which the frame runs once the dialog is gone. It is also the only reason a
+   test can check what a dialog would do without pressing its button.
+3. **Edit commands go to a focused text field first.** On macOS the platform menu owns ⌘X/C/V/A/Z,
+   so a field would never see them: `commands::text_field_edit` turns the menu click back into the
+   egui input event the field is waiting for, with `arboard` supplying the clipboard text for
+   Paste. This is the rule `handleNativeMenu` follows in `src/ui/App.tsx`, and it is why the native
+   Edit menu can act on both the tape and a text field.
+4. **The rows are built once per version of the tape**, keyed on the same generation number plus a
+   counter for the display options. A cursor move rebuilds nothing; changing the Dec/Hex switch
+   rebuilds both panes. This is the in-process version of the two caching rules stage 2 measured.
+
+**What the tests cover.** `npm run native:test` is 54 tests:
+
+- `tests/menu.rs` reads `src/state/commands.ts` and checks the table against it — every id present
+  in both, no duplicates, and now **the enabled rule of every command**, parsed from the web's own
+  `enabled:` expressions. A predicate this test cannot read is a failure, not a skip.
+- `src/state.rs` tests the semantics nobody wrote down: dirty across undo/redo/save, collapsed
+  groups as one unit, what moves when a selected block is grabbed, move-up past a collapsed group,
+  paste getting fresh uids, the four click modes, compare and find-match marks.
+- `src/commands.rs` runs **every command id** that does not reach outside the process and fails if
+  one has no arm; plus the option toggles, a disabled command doing nothing, and the Edit commands
+  going to a focused field.
+- `src/list.rs` tests the list itself: what a collapsed group hides, where a drop lands next to
+  one, the drop the web ignores, and that the rows carry the indent, the range and the block
+  numbering the options ask for.
+- `src/app.rs` draws real frames headlessly, through `egui::Context::run_ui` with no window and no
+  event loop: the cursor on all 25 block types, an empty tape, all nine dialogs, all six data
+  window views, a collapsed group with its context menu open, and both themes. This is the native
+  answer to `npm run smoke`, and it catches a layout panic or a bad index before the window does.
+
+**What is left, honestly.** One is the person's; the other two are platform plumbing that
+stage 5's packaging work touches anyway:
+
+- **The two numbers.** Cold start and a 3,000-row cursor move still have to be read off a running
+  window; `npm run native` prints both commands. The boundary numbers this stage could take from a
+  terminal are unchanged from stage 3 (0.67 ms to describe 3,000 blocks, 0.17 ms for the content
+  labels, 0.63 ms to serialize). Binary size is **6.1 MB** stripped, arm64 only, up from the
+  skeleton's 5.2 MB with rfd, cpal, zlib, png and arboard added.
+- **File associations.** The bundle now declares TZX and TAP as document types, and a tape named on
+  the command line opens (a second one goes into the right pane, the way `?open=&right=` does on
+  the web). What is not wired is the Apple Event macOS sends when you double-click a document while
+  the app is already running: eframe does not surface it, so that path needs a winit hook. Windows
+  needs its association written by an installer, which is stage 5's packaging work anyway.
+- **muda on Windows.** Still `init_for_hwnd`, still waiting for the window handle out of eframe.
+  Until then Windows gets the egui menu bar, with the accelerators handled by `app.rs` from the
+  same table — so nothing is missing, it just is not the platform's own bar.
+
+### Starting stage 5
+
+The native binary becomes the desktop app. `src-tauri/` retires except for `emulator.rs`, which
+`native/src/emulator.rs` already holds a copy of — delete the Tauri one and its two
+`#[tauri::command]` attributes are the whole difference. `scripts/build-native.mjs` is the start of
+the packaging: it already writes the Info.plist with the document types. The release workflow
+(`.github/workflows/release.yml`) is what has to change next, and the Linux download should fall
+from 76 MB to under 25 MB once WebKitGTK is gone.
 
 ## Stage 5 — Switch (a day, plus CI round trips)
 

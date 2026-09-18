@@ -1,55 +1,45 @@
-//! The window: tape header, block list, status bar — and the measuring harness.
+//! The window: two tape panes, the editor under each, the status bar, and the
+//! keyboard. The port of `src/ui/App.tsx` and the frame of `TapePane.tsx`.
 //!
-//! egui is immediate mode, so there is no second language and no binding graph:
-//! the frame reads this struct and draws it. The rows are built once from the
-//! core, because `describe_block` on 3,000 blocks is 0.9 ms and a frame is 16.
+//! egui is immediate mode, so there is no binding graph and no component tree:
+//! this struct *is* the app, and the frame reads it. What used to be a signal
+//! subscription is a field read; what used to be a `useEffect` is a line in the
+//! right order.
 
 use std::time::Instant;
 
-use egui::{pos2, vec2, Align2, Color32, CornerRadius, FontId, Rect, Sense};
+use egui::{vec2, Align, Key, KeyboardShortcut, Layout, Modifiers, Rect, RichText, Sense, Ui};
 
-use spectape_core::types::Block;
+use spectape_core::types::Uid;
+use spectape_core::writer::required_version;
 
+use crate::actions::Then;
+use crate::commands;
+use crate::datawin::DataWin;
+use crate::editor::EditorState;
+use crate::fmt;
+use crate::list::{self, RowCache};
 use crate::menu::Menu;
 use crate::menutable;
-use crate::{run_command, status_line, Counts};
+use crate::player::{Player, Progress};
+use crate::settings::Theme;
+use crate::state::{SelectMode, Side, Store};
+use crate::statusbar;
+use crate::theme::{self, Tokens};
 
-/// The light half of src/style.css, the tokens the web list uses.
-pub mod tok {
-    use egui::Color32;
-    pub const BG: Color32 = Color32::from_rgb(0xee, 0xf0, 0xf4);
-    pub const SURFACE: Color32 = Color32::from_rgb(0xff, 0xff, 0xff);
-    pub const SURFACE_2: Color32 = Color32::from_rgb(0xf6, 0xf7, 0xf9);
-    pub const BORDER: Color32 = Color32::from_rgb(0xdf, 0xe3, 0xea);
-    pub const TEXT: Color32 = Color32::from_rgb(0x17, 0x1b, 0x26);
-    pub const MUTED: Color32 = Color32::from_rgb(0x6b, 0x72, 0x80);
-    pub const FAINT: Color32 = Color32::from_rgb(0x9a, 0xa3, 0xb2);
-    pub const ACCENT: Color32 = Color32::from_rgb(0x2f, 0x6f, 0xed);
-    pub const ACCENT_SOFT: Color32 = Color32::from_rgb(0xe6, 0xee, 0xfc);
-    /// `category()` in src/ui/TapePane.tsx.
-    pub const CAT: [Color32; 6] = [
-        Color32::from_rgb(0x2f, 0x6f, 0xed), // data
-        Color32::from_rgb(0x0e, 0x9f, 0x9f), // signal
-        Color32::from_rgb(0xd9, 0x77, 0x06), // flow
-        Color32::from_rgb(0x7c, 0x3a, 0xed), // struct
-        Color32::from_rgb(0x64, 0x74, 0x8b), // info
-        Color32::from_rgb(0xb9, 0x1c, 0x1c), // unknown
-    ];
+const EDITOR_MIN: f32 = 140.0;
+const EDITOR_DEFAULT: f32 = 340.0;
+const PANE_MIN: f32 = 300.0;
+const SPLITTER_W: f32 = 8.0;
+const HEAD_H: f32 = 30.0;
+
+/// Blocks being dragged, and where they came from.
+pub struct Drag {
+    pub from: Side,
+    pub indices: Vec<usize>,
 }
 
-const ROW_H: f32 = 20.0;
-
-pub struct Row {
-    pub no: String,
-    pub id: String,
-    pub desc: String,
-    pub kind: String,
-    pub len: String,
-    pub indent: f32,
-    pub cat: usize,
-}
-
-/// What `--bench` collects, and what the status bar shows while the window is open.
+/// What `--bench` collects, and what the status bar shows while it runs.
 #[derive(Default)]
 struct Perf {
     update: Vec<f64>,
@@ -64,15 +54,29 @@ fn stats(v: &[f64]) -> (f64, f64, f64) {
 }
 
 pub struct App {
-    blocks: Vec<Block>,
-    rows: Vec<Row>,
-    counts: Counts,
-    cursor: usize,
-    status: String,
-    tape_name: String,
-    tape_info: String,
-    checked: Vec<bool>,
-    menu: Menu,
+    /// A handle on the context, so a command can answer a menu click with an
+    /// input event (see `commands::text_field_edit`).
+    pub ctx: egui::Context,
+    /// Whether a text field has the keyboard, read once a frame.
+    pub text_focus: bool,
+    pub store: Store,
+    pub player: Player,
+    pub progress: Progress,
+    pub menu: Menu,
+    pub rows: [RowCache; 2],
+    pub editor: [EditorState; 2],
+    pub datawin: Option<DataWin>,
+    pub context_menu: Option<(Side, egui::Pos2)>,
+    pub drag: Option<Drag>,
+    pub drop_target: Option<(Side, (usize, bool))>,
+    pub tokens: Tokens,
+    /// A row to bring into view on the next frame, per pane.
+    pub scroll_to: [Option<usize>; 2],
+    pub scroll_offset: [f32; 2],
+    pub view_h: [f32; 2],
+    /// An action a dialog agreed to, run once the dialog is gone.
+    pub pending: Option<Then>,
+    theme_applied: Option<(Theme, bool)>,
 
     start: Instant,
     first_frame: bool,
@@ -80,108 +84,365 @@ pub struct App {
     bench_left: usize,
     benching: bool,
     perf: Perf,
-
-    scroll_to_cursor: bool,
-    scroll_offset: f32,
-    view_h: f32,
 }
 
 impl App {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         cc: &eframe::CreationContext<'_>,
-        blocks: Vec<Block>,
-        rows: Vec<Row>,
-        counts: Counts,
-        tape_name: String,
-        tape_info: String,
+        store: Store,
         start: Instant,
         bench: usize,
         exit_on_draw: bool,
-    ) -> Self {
-        style(&cc.egui_ctx);
-        let menu = Menu::new(&cc.egui_ctx);
-        menu.set_enabled(&menutable::enabled_flags(blocks.len(), !blocks.is_empty()));
-        let status = status_line(&blocks, 0, counts);
+    ) -> App {
+        App::build(&cc.egui_ctx, Menu::new(&cc.egui_ctx), store, start, bench, exit_on_draw)
+    }
+
+    /// The part of start-up that needs no window, so a test can draw frames.
+    pub fn build(
+        ctx: &egui::Context,
+        menu: Menu,
+        store: Store,
+        start: Instant,
+        bench: usize,
+        exit_on_draw: bool,
+    ) -> App {
+        let tokens = theme::tokens(store.settings.theme, system_dark(ctx));
+        ctx.set_visuals(tokens.visuals());
         App {
-            blocks,
-            rows,
-            counts,
-            cursor: 0,
-            status,
-            tape_name,
-            tape_info,
-            checked: vec![false; menutable::item_count()],
+            ctx: ctx.clone(),
+            text_focus: false,
+            store,
+            player: Player::default(),
+            progress: Progress::default(),
             menu,
+            rows: Default::default(),
+            editor: Default::default(),
+            datawin: None,
+            context_menu: None,
+            drag: None,
+            drop_target: None,
+            tokens,
+            scroll_to: [None, None],
+            scroll_offset: [0.0, 0.0],
+            view_h: [400.0, 400.0],
+            pending: None,
+            theme_applied: None,
             start,
             first_frame: true,
             exit_on_draw,
             bench_left: bench,
             benching: bench > 0,
             perf: Perf::default(),
-            scroll_to_cursor: false,
-            scroll_offset: 0.0,
-            view_h: 400.0,
         }
     }
 
-    fn move_cursor(&mut self, delta: i64) {
-        let last = self.rows.len().saturating_sub(1) as i64;
-        self.set_cursor((self.cursor as i64 + delta).clamp(0, last.max(0)) as usize);
+    pub fn scroll_to_cursor(&mut self, side: Side) {
+        let cursor = self.store.tape(side).cursor;
+        if cursor >= 0 {
+            self.scroll_to[side] = Some(cursor as usize);
+        }
     }
 
-    fn set_cursor(&mut self, index: usize) {
-        self.cursor = index.min(self.rows.len().saturating_sub(1));
-        // Rebuilt from the core on every move: the per-row work the wasm boundary
-        // used to charge for.
-        self.status = status_line(&self.blocks, self.cursor, self.counts);
-        self.scroll_to_cursor = true;
+    pub fn open_data_window(&mut self, side: Side, uids: Vec<Uid>) {
+        self.datawin = Some(DataWin::new(&self.store.tape(side).blocks, side, uids));
+    }
+
+    /// The row the playing marker sits on: a block inside a collapsed range
+    /// marks the range's header, as the web list does.
+    pub fn playing_row(&self, side: Side) -> Option<usize> {
+        if self.progress.side != Some(side) || self.progress.block < 0 {
+            return None;
+        }
+        let mut row = self.progress.block as usize;
+        let t = self.store.tape(side);
+        let ranges = t.ranges();
+        for (s, e) in ranges {
+            if s < row && row <= e && t.collapsed.contains(&t.blocks[s].uid) {
+                row = s;
+            }
+        }
+        Some(row)
+    }
+
+    fn modal_open(&self) -> bool {
+        self.store.dialog.is_some() || self.datawin.is_some()
+    }
+
+    // ---- keyboard ---------------------------------------------------------
+
+    fn handle_keys(&mut self, ctx: &egui::Context) {
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+            if self.store.dialog.is_some() {
+                self.store.dialog = None;
+            } else if self.datawin.is_some() {
+                self.datawin = None;
+            } else {
+                self.context_menu = None;
+            }
+            return;
+        }
+        if self.modal_open() {
+            return; // the modal handles its own keys
+        }
+        let side = self.store.active;
+
+        // Accelerators. On macOS the platform menu owns every one it declares,
+        // so these never arrive; elsewhere this is what makes them work.
+        if !fmt::IS_MAC {
+            let mut fired = None;
+            for item in menutable::flat() {
+                if let Some((mods, key)) = commands::accelerator(item) {
+                    if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(mods, key))) {
+                        fired = Some(item.id);
+                        break;
+                    }
+                }
+            }
+            if let Some(id) = fired {
+                commands::run(self, id, side);
+                self.scroll_to_cursor(side);
+                return;
+            }
+        }
+
+        // Keys that belong to a focused text field, not to the tape.
+        if ctx.memory(|m| m.focused().is_some()) {
+            return;
+        }
+
+        for (key, id) in commands::PLAIN_KEYS {
+            if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, *key)) {
+                commands::run(self, id, side);
+                self.scroll_to_cursor(side);
+                return;
+            }
+        }
+
+        // Cursor movement and play/stop are not menu commands: they need the
+        // modifier state, which an accelerator cannot express.
+        let t = self.store.tape(side);
+        let (cursor, len) = (t.cursor, t.blocks.len() as i32);
+        let shift = ctx.input(|i| i.modifiers.shift);
+        let mode = if shift { SelectMode::Range } else { SelectMode::Single };
+        let mut moved = None;
+        ctx.input_mut(|i| {
+            if i.consume_key(Modifiers::NONE, Key::ArrowUp) || i.consume_key(Modifiers::SHIFT, Key::ArrowUp) {
+                moved = Some((cursor - 1).max(0));
+            }
+            if i.consume_key(Modifiers::NONE, Key::ArrowDown)
+                || i.consume_key(Modifiers::SHIFT, Key::ArrowDown)
+            {
+                moved = Some((cursor + 1).min(len - 1));
+            }
+            if i.consume_key(Modifiers::NONE, Key::Home) {
+                moved = Some(0);
+            }
+            if i.consume_key(Modifiers::NONE, Key::End) {
+                moved = Some(len - 1);
+            }
+            if i.consume_key(Modifiers::NONE, Key::PageUp) {
+                moved = Some((cursor - 20).max(0));
+            }
+            if i.consume_key(Modifiers::NONE, Key::PageDown) {
+                moved = Some((cursor + 20).min(len - 1));
+            }
+        });
+        if let Some(index) = moved {
+            if len > 0 {
+                self.store.set_cursor(side, index, mode);
+                self.scroll_to_cursor(side);
+            }
+            return;
+        }
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Space)) {
+            if self.player.playing() {
+                self.player.stop();
+            } else {
+                crate::actions::play_tape(self, side, true);
+            }
+        }
     }
 
     fn handle_menu(&mut self) {
         for id in self.menu.take_activated() {
-            let items = menutable::flat();
-            let Some((flat, item)) = items.iter().enumerate().find(|(_, it)| it.id == id) else {
-                continue;
-            };
-            if item.check {
-                self.checked[flat] = !self.checked[flat];
-                self.menu.set_checked(flat, self.checked[flat]);
-            }
-            self.status = run_command(item, &self.blocks, self.cursor, self.checked[flat]);
+            let side = self.store.active;
+            commands::run(self, &id, side);
+            self.scroll_to_cursor(side);
         }
     }
 
-    fn handle_keys(&mut self, ctx: &egui::Context) {
-        use egui::Key;
-        let page = ((self.view_h / ROW_H).floor() as i64 - 1).max(1);
-        let (mut delta, mut to) = (0i64, None);
-        ctx.input(|i| {
-            if i.key_pressed(Key::ArrowDown) {
-                delta += 1;
+    /// Push the enabled and checked state of every item to the platform menu.
+    fn sync_menu(&mut self) {
+        let side = self.store.active;
+        let state = commands::menu_state(self, side);
+        let flags = menutable::enabled_flags(&state);
+        let checks: Vec<bool> = menutable::flat().iter().map(|i| commands::checked(self, i.id)).collect();
+        self.menu.set_state(&flags, &checks);
+    }
+
+    // ---- panes ------------------------------------------------------------
+
+    fn panes(&mut self, ui: &mut Ui) {
+        let full = ui.available_rect_before_wrap();
+        let avail = full.width() - SPLITTER_W;
+        let min_frac = if avail > 2.0 * PANE_MIN { PANE_MIN / avail } else { 0.5 };
+        let frac = self.store.settings.pane_split.clamp(min_frac, 1.0 - min_frac);
+        let left_w = avail * frac;
+
+        let left = Rect::from_min_size(full.min, vec2(left_w, full.height()));
+        let bar = Rect::from_min_size(egui::pos2(left.right(), full.top()), vec2(SPLITTER_W, full.height()));
+        let right =
+            Rect::from_min_size(egui::pos2(bar.right(), full.top()), vec2(avail - left_w, full.height()));
+
+        for (side, rect) in [(0usize, left), (1usize, right)] {
+            // Salted per side: the two panes draw the same widgets, and their
+            // ids have to stay apart.
+            let builder = egui::UiBuilder::new()
+                .id_salt(("pane", side))
+                .max_rect(rect)
+                .layout(Layout::top_down(Align::Min));
+            let mut child = ui.new_child(builder);
+            self.pane(&mut child, side, rect);
+        }
+
+        let r = ui.interact(bar, ui.id().with("vsplitter"), Sense::click_and_drag());
+        ui.painter().rect_filled(bar, egui::CornerRadius::ZERO, self.tokens.bg);
+        ui.painter().vline(bar.center().x, bar.y_range(), egui::Stroke::new(1.0, self.tokens.border));
+        if r.hovered() || r.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+        if r.dragged() {
+            let dx = r.drag_delta().x / avail;
+            self.store.settings.pane_split = (frac + dx).clamp(min_frac, 1.0 - min_frac);
+        }
+        if r.double_clicked() {
+            self.store.settings.pane_split = 0.5;
+        }
+        if r.drag_stopped() || r.double_clicked() {
+            self.store.settings.save();
+        }
+        ui.advance_cursor_after_rect(full);
+    }
+
+    fn pane(&mut self, ui: &mut Ui, side: Side, rect: Rect) {
+        let tok = self.tokens;
+        let active = self.store.active == side;
+        ui.painter().rect_filled(rect, egui::CornerRadius::same(8), tok.surface);
+        if active {
+            ui.painter().rect_stroke(
+                rect,
+                egui::CornerRadius::same(8),
+                egui::Stroke::new(1.0, tok.accent),
+                egui::StrokeKind::Inside,
+            );
+        } else {
+            ui.painter().rect_stroke(
+                rect,
+                egui::CornerRadius::same(8),
+                egui::Stroke::new(1.0, tok.border),
+                egui::StrokeKind::Inside,
+            );
+        }
+        if ui.interact(rect, ui.id().with(("pane", side)), Sense::click()).clicked() {
+            self.store.active = side;
+        }
+        ui.add_space(4.0);
+        self.pane_head(ui, side);
+
+        let editor_h =
+            self.store.settings.editor_height.clamp(EDITOR_MIN, (rect.height() - 160.0).max(EDITOR_MIN));
+        let list_h = (rect.height() - HEAD_H - editor_h - 18.0).max(60.0);
+        let list_rect = Rect::from_min_size(
+            egui::pos2(rect.left() + 1.0, ui.cursor().top()),
+            vec2(rect.width() - 2.0, list_h),
+        );
+        let builder = egui::UiBuilder::new()
+            .id_salt(("list", side))
+            .max_rect(list_rect)
+            .layout(Layout::top_down(Align::Min));
+        let mut child = ui.new_child(builder);
+        list::show(self, &mut child, side);
+        ui.advance_cursor_after_rect(list_rect);
+
+        // The editor splitter: drag to resize, double-click to restore.
+        let bar = Rect::from_min_size(egui::pos2(rect.left(), ui.cursor().top()), vec2(rect.width(), 6.0));
+        let r = ui.interact(bar, ui.id().with(("hsplitter", side)), Sense::click_and_drag());
+        ui.painter().hline(bar.x_range(), bar.center().y, egui::Stroke::new(1.0, tok.border));
+        if r.hovered() || r.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+        }
+        if r.dragged() {
+            self.store.settings.editor_height = (editor_h - r.drag_delta().y).max(EDITOR_MIN);
+        }
+        if r.double_clicked() {
+            self.store.settings.editor_height = EDITOR_DEFAULT;
+        }
+        if r.drag_stopped() || r.double_clicked() {
+            self.store.settings.save();
+        }
+        ui.advance_cursor_after_rect(bar);
+
+        let editor_rect = Rect::from_min_size(
+            egui::pos2(rect.left() + 6.0, ui.cursor().top()),
+            vec2(rect.width() - 12.0, editor_h),
+        );
+        let builder = egui::UiBuilder::new()
+            .id_salt(("editor", side))
+            .max_rect(editor_rect)
+            .layout(Layout::top_down(Align::Min));
+        let mut child = ui.new_child(builder);
+        crate::editor::show(self, &mut child, side, editor_h);
+    }
+
+    fn pane_head(&mut self, ui: &mut Ui, side: Side) {
+        let tok = self.tokens;
+        let mut run: Option<&'static str> = None;
+        ui.horizontal(|ui| {
+            ui.add_space(6.0);
+            let t = self.store.tape(side);
+            ui.label(RichText::new(if side == 0 { "L" } else { "R" }).size(10.0).color(tok.faint));
+            ui.label(RichText::new(&t.name).size(13.0).strong());
+            if t.dirty() {
+                ui.label(RichText::new("●").size(10.0).color(tok.accent)).on_hover_text("Unsaved changes");
             }
-            if i.key_pressed(Key::ArrowUp) {
-                delta -= 1;
+            if !t.blocks.is_empty() {
+                let v = required_version(&t.blocks);
+                ui.label(
+                    RichText::new(format!("TZX {}.{:02}", v.major, v.minor)).size(10.0).color(tok.muted),
+                )
+                .on_hover_text("TZX version this tape will be saved as");
             }
-            if i.key_pressed(Key::PageDown) {
-                delta += page;
-            }
-            if i.key_pressed(Key::PageUp) {
-                delta -= page;
-            }
-            if i.key_pressed(Key::Home) {
-                to = Some(0);
-            }
-            if i.key_pressed(Key::End) {
-                to = Some(self.rows.len().saturating_sub(1));
-            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let has = !self.store.tape(side).blocks.is_empty();
+                if ui.small_button("ℹ").on_hover_text("Tape info…").clicked() && has {
+                    run = Some("tape-info");
+                }
+                if ui.small_button("☰").on_hover_text("Programs…").clicked() && has {
+                    run = Some("programs");
+                }
+                let playing = self.player.playing();
+                let label = if playing { "■" } else { "▶" };
+                let hover = if playing { "Stop playback" } else { "Play from cursor" };
+                if ui.small_button(label).on_hover_text(hover).clicked() && has {
+                    run = Some(if playing { "stop" } else { "play-cursor" });
+                }
+                if ui.small_button("＋").on_hover_text("Insert block…").clicked() {
+                    run = Some("insert");
+                }
+                if ui.small_button("💾").on_hover_text("Save").clicked() && has {
+                    run = Some("save");
+                }
+                if ui.small_button("📂").on_hover_text("Open tape…").clicked() {
+                    run = Some("open");
+                }
+            });
         });
-        if let Some(index) = to {
-            self.set_cursor(index);
-        } else if delta != 0 {
-            self.move_cursor(delta);
+        if let Some(id) = run {
+            commands::run(self, id, side);
         }
     }
+
+    // ---- measuring --------------------------------------------------------
 
     /// `--bench`: one cursor move per frame, so every sample is a real frame.
     fn bench_step(&mut self, ctx: &egui::Context) {
@@ -197,7 +458,7 @@ impl App {
                      our own frame build  min {lo:.2} ms, median {mid:.2} ms, max {hi:.2} ms\n  \
                      whole frame          min {flo:.2} ms, median {fmid:.2} ms, max {fhi:.2} ms",
                     self.perf.update.len(),
-                    self.rows.len()
+                    self.store.tape(0).blocks.len()
                 );
             }
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -205,167 +466,239 @@ impl App {
         }
         self.bench_left -= 1;
         let down = self.perf.update.len() % 40 < 20;
-        self.move_cursor(if down { 1 } else { -1 });
+        let t = self.store.tape(0);
+        let last = t.blocks.len() as i32 - 1;
+        let next = (t.cursor + if down { 1 } else { -1 }).clamp(0, last.max(0));
+        self.store.set_cursor(0, next, SelectMode::Single);
+        self.scroll_to_cursor(0);
         ctx.request_repaint();
     }
-
-    fn list(&mut self, ui: &mut egui::Ui) {
-        let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
-        if self.scroll_to_cursor {
-            self.scroll_to_cursor = false;
-            let spacing = ui.spacing().item_spacing.y;
-            let top = self.cursor as f32 * (ROW_H + spacing);
-            let offset = if top < self.scroll_offset {
-                top
-            } else if top + ROW_H > self.scroll_offset + self.view_h {
-                top + ROW_H - self.view_h
-            } else {
-                self.scroll_offset
-            };
-            area = area.vertical_scroll_offset(offset);
-        }
-
-        let (rows, cursor) = (&self.rows, self.cursor);
-        let mut clicked = None;
-        let out = area.show_rows(ui, ROW_H, rows.len(), |ui, range| {
-            for i in range {
-                let (rect, response) =
-                    ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
-                if response.clicked() {
-                    clicked = Some(i);
-                }
-                if ui.is_rect_visible(rect) {
-                    draw_row(ui, rect, &rows[i], i, cursor);
-                }
-            }
-        });
-        self.scroll_offset = out.state.offset.y;
-        self.view_h = out.inner_rect.height();
-        if let Some(i) = clicked {
-            self.set_cursor(i);
-        }
-    }
-}
-
-fn draw_row(ui: &egui::Ui, rect: Rect, row: &Row, index: usize, cursor: usize) {
-    let p = ui.painter();
-    if index == cursor {
-        p.rect_filled(rect, CornerRadius::ZERO, tok::ACCENT_SOFT);
-        let bar = Rect::from_min_size(rect.left_top(), vec2(3.0, rect.height()));
-        p.rect_filled(bar, CornerRadius::ZERO, tok::ACCENT);
-    } else if index % 2 == 1 {
-        p.rect_filled(rect, CornerRadius::ZERO, tok::SURFACE_2);
-    }
-
-    let y = rect.center().y;
-    let mono = FontId::monospace(11.0);
-    p.text(pos2(rect.left() + 52.0, y), Align2::RIGHT_CENTER, &row.no, mono.clone(), tok::FAINT);
-
-    let badge = Rect::from_min_size(pos2(rect.left() + 60.0, y - 7.5), vec2(26.0, 15.0));
-    p.rect_filled(badge, CornerRadius::same(4), tok::CAT[row.cat]);
-    p.text(badge.center(), Align2::CENTER_CENTER, &row.id, FontId::monospace(10.0), Color32::WHITE);
-
-    // The description gets what is left between the badge and the two right columns.
-    let left = rect.left() + 94.0 + row.indent;
-    let right = rect.right() - 170.0;
-    if right > left {
-        let clip = Rect::from_min_max(pos2(left, rect.top()), pos2(right, rect.bottom()));
-        p.with_clip_rect(clip).text(
-            pos2(left, y),
-            Align2::LEFT_CENTER,
-            &row.desc,
-            FontId::proportional(12.0),
-            tok::TEXT,
-        );
-    }
-    p.text(
-        pos2(rect.right() - 86.0, y),
-        Align2::RIGHT_CENTER,
-        &row.kind,
-        FontId::proportional(11.0),
-        tok::MUTED,
-    );
-    p.text(pos2(rect.right() - 8.0, y), Align2::RIGHT_CENTER, &row.len, mono, tok::MUTED);
-}
-
-fn style(ctx: &egui::Context) {
-    let mut visuals = egui::Visuals::light();
-    visuals.panel_fill = tok::BG;
-    visuals.window_fill = tok::SURFACE;
-    visuals.extreme_bg_color = tok::SURFACE;
-    visuals.override_text_color = Some(tok::TEXT);
-    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, tok::BORDER);
-    visuals.selection.bg_fill = tok::ACCENT_SOFT;
-    visuals.selection.stroke = egui::Stroke::new(1.0, tok::ACCENT);
-    ctx.set_visuals(visuals);
 }
 
 impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let t = Instant::now();
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        self.frame(ui);
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.store.settings.save();
+    }
+}
+
+impl App {
+    /// One frame. Separate from the `eframe::App` impl so the tests can run it
+    /// against a bare `egui::Context`, with no window and no event loop.
+    pub fn frame(&mut self, ui: &mut Ui) {
+        let t0 = Instant::now();
         let ctx = ui.ctx().clone();
+        self.ctx = ctx.clone();
         let ctx = &ctx;
+        // Read before anything draws, so it describes the field that had the
+        // keyboard when the menu item was clicked.
+        self.text_focus = ctx.text_edit_focused();
+
+        // The theme follows the desktop when it is set to "system".
+        let system_dark = system_dark(ctx);
+        let want = (self.store.settings.theme, system_dark);
+        if self.theme_applied != Some(want) {
+            self.tokens = theme::tokens(want.0, want.1);
+            ctx.set_visuals(self.tokens.visuals());
+            self.theme_applied = Some(want);
+        }
+
+        self.progress = self.player.poll();
+        if self.progress.playing {
+            ctx.request_repaint();
+            if let Some(side) = self.progress.side {
+                if let Some(row) = self.playing_row(side) {
+                    self.scroll_to[side] = Some(row);
+                }
+            }
+        }
+        // A drop target is only meaningful while the pointer is over a list;
+        // each pane sets it again this frame if it is.
+        self.drop_target = None;
         self.handle_menu();
         self.handle_keys(ctx);
+        if let Some(then) = self.pending.take() {
+            crate::actions::run_then(self, then);
+        }
+        list::refresh(self);
         self.bench_step(ctx);
+        self.sync_menu();
 
         // On macOS the menu is the platform's own, set by muda; elsewhere it is
         // drawn here from the same table.
         #[cfg(not(target_os = "macos"))]
-        egui::Panel::top("menubar").show(ui, |ui| self.menu.bar(ui));
-
-        egui::Panel::top("header").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.add_space(2.0);
-                ui.label(egui::RichText::new(&self.tape_name).size(13.0).strong());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(&self.tape_info).monospace().size(11.0).color(tok::MUTED));
-                });
+        {
+            let side = self.store.active;
+            let state = commands::menu_state(self, side);
+            let mut fired = None;
+            egui::Panel::top("menubar").show(ui, |ui| {
+                fired = self.menu.bar(ui, &state, &self.tokens);
             });
-        });
+            if let Some(id) = fired {
+                commands::run(self, &id, side);
+            }
+        }
 
-        egui::Panel::bottom("status").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(&self.status).size(11.0).color(tok::MUTED));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let text = if self.perf.update.is_empty() {
-                        String::new()
-                    } else {
-                        let (_, mid, hi) = stats(&self.perf.update);
-                        format!(
-                            "frame {:.2} ms · {} moves, median {mid:.2} / max {hi:.2}",
-                            self.perf.last_update,
-                            self.perf.update.len()
-                        )
-                    };
-                    ui.label(egui::RichText::new(text).monospace().size(10.0).color(tok::FAINT));
-                });
-            });
-        });
+        egui::Panel::bottom("status").show(ui, |ui| statusbar::show(self, ui));
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(tok::SURFACE).inner_margin(egui::Margin::same(1)))
-            .show(ui, |ui| self.list(ui));
+            .frame(egui::Frame::new().fill(self.tokens.bg).inner_margin(egui::Margin::same(5)))
+            .show(ui, |ui| self.panes(ui));
+        list::finish_drag(self, ctx);
 
-        let ms = t.elapsed().as_secs_f64() * 1000.0;
+        crate::dialogs::draw(self, ctx);
+        crate::datawin::draw(self, ctx);
+        list::context_menu(self, ctx);
+        if let Some(then) = self.pending.take() {
+            crate::actions::run_then(self, then);
+        }
+
+        // The window title mirrors the active tape.
+        let t = self.store.active_tape();
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
+            "{}{} — SpecTape",
+            t.name,
+            if t.dirty() { " *" } else { "" }
+        )));
+
+        let ms = t0.elapsed().as_secs_f64() * 1000.0;
         self.perf.last_update = ms;
         if !self.first_frame {
-            // The first frame includes font atlas building and window setup; it is
-            // the cold start number, not a cursor move.
+            // The first frame includes font atlas building and window set-up; it
+            // is the cold start number, not a cursor move.
             self.perf.update.push(ms);
             self.perf.frame.push(f64::from(ctx.input(|i| i.unstable_dt)) * 1000.0);
         }
-
         if self.first_frame {
             self.first_frame = false;
             println!(
                 "first frame: {:.0} ms after main() started ({} rows)",
                 self.start.elapsed().as_secs_f64() * 1000.0,
-                self.rows.len()
+                self.store.tape(0).blocks.len()
             );
             if self.exit_on_draw {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
+        }
+    }
+}
+
+/// Whether the desktop asked for a dark theme; what `Theme::System` follows.
+fn system_dark(ctx: &egui::Context) -> bool {
+    ctx.system_theme().unwrap_or(ctx.theme()) == egui::Theme::Dark
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::actions::{Scope, Then};
+    use crate::dialogs::Dialog;
+    use crate::settings::Settings;
+    use spectape_core::types::{create_body, Block, CREATABLE_IDS};
+
+    /// A tape with one block of every type the editor can create, which is what
+    /// makes one frame cover all 25 forms.
+    fn every_block() -> Vec<Block> {
+        CREATABLE_IDS.iter().map(|id| Block::new(create_body(*id))).collect()
+    }
+
+    fn app_with(blocks: Vec<Block>) -> (egui::Context, App) {
+        let ctx = egui::Context::default();
+        let mut store = Store::new(Settings::default());
+        store.tape_mut(0).load("demo.tzx".into(), None, blocks, None);
+        let app = App::build(&ctx, Menu::headless(), store, Instant::now(), 0, false);
+        (ctx, app)
+    }
+
+    /// Draw one frame against a bare context: no window, no event loop, but the
+    /// same code the window runs — `run_ui` hands over the root `Ui` that eframe
+    /// would. A layout panic or an out-of-range index shows up here instead of
+    /// on screen.
+    fn draw(ctx: &egui::Context, app: &mut App) {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(1200.0, 800.0))),
+            ..Default::default()
+        };
+        ctx.run_ui(input, |ui| app.frame(ui)).drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn draws_a_frame_with_the_cursor_on_every_block_type() {
+        let (ctx, mut app) = app_with(every_block());
+        for i in 0..CREATABLE_IDS.len() {
+            app.store.set_cursor(0, i as i32, SelectMode::Single);
+            draw(&ctx, &mut app);
+        }
+    }
+
+    #[test]
+    fn draws_an_empty_tape() {
+        let (ctx, mut app) = app_with(Vec::new());
+        draw(&ctx, &mut app);
+    }
+
+    #[test]
+    fn draws_every_dialog() {
+        let (ctx, mut app) = app_with(every_block());
+        app.store.set_cursor(0, 0, SelectMode::Single);
+        let dialogs = [
+            Dialog::message("Hello", vec!["one".into(), "two".into()]),
+            Dialog::confirm("Sure?", vec!["really".into()], Then::NewTape(0)),
+            Dialog::about(),
+            Dialog::insert(0),
+            Dialog::tape_info(0),
+            Dialog::consistency(0),
+            Dialog::wav(0),
+            Dialog::programs(0),
+            Dialog::emulator(true, Some(Then::EmulatorGo(0, Scope::Tape)), &Settings::default()),
+        ];
+        for d in dialogs {
+            app.store.dialog = Some(d);
+            draw(&ctx, &mut app);
+            app.store.dialog = None;
+        }
+    }
+
+    #[test]
+    fn draws_every_data_window_view() {
+        use crate::datawin::ViewAs;
+        let (ctx, mut app) = app_with(every_block());
+        // The standard-speed data block, filled with something to look at.
+        let uid = app.store.tape(0).blocks[0].uid;
+        app.store.replace_block(
+            0,
+            uid,
+            spectape_core::types::Body::Standard { pause: 1000, data: (0..=255u8).collect() },
+        );
+        app.store.set_cursor(0, 0, SelectMode::Single);
+        for view in [ViewAs::Dump, ViewAs::Screen, ViewAs::Basic, ViewAs::Vars, ViewAs::Text, ViewAs::Dis] {
+            app.open_data_window(0, vec![uid]);
+            app.datawin.as_mut().unwrap().set_view(view);
+            draw(&ctx, &mut app);
+            app.datawin = None;
+        }
+    }
+
+    #[test]
+    fn draws_a_collapsed_group_and_a_context_menu() {
+        let ids = [0x21u8, 0x10, 0x22, 0x20];
+        let (ctx, mut app) = app_with(ids.iter().map(|id| Block::new(create_body(*id))).collect());
+        let group = app.store.tape(0).blocks[0].uid;
+        app.store.toggle_collapse(0, group);
+        app.store.set_cursor(0, 0, SelectMode::Single);
+        app.context_menu = Some((0, egui::pos2(100.0, 100.0)));
+        draw(&ctx, &mut app);
+    }
+
+    #[test]
+    fn draws_both_themes() {
+        let (ctx, mut app) = app_with(every_block());
+        for theme in [Theme::Light, Theme::Dark, Theme::System] {
+            app.store.settings.theme = theme;
+            draw(&ctx, &mut app);
         }
     }
 }

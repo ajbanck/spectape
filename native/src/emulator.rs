@@ -1,6 +1,12 @@
 //! "Open in emulator": write the tape to a temp file and start an external emulator with it.
 //! The program is either chosen by the user or auto-detected (Fuse). It is started directly,
 //! never through a shell, so paths with spaces need no quoting.
+//!
+//! Lifted from `src-tauri/src/emulator.rs` with the two `#[tauri::command]`
+//! attributes dropped: the Tauri build reaches these through the IPC bridge, the
+//! native one calls them. Stage 5 retires the copy in `src-tauri/`, which is why
+//! this file is a copy rather than a shared crate — the two are only both alive
+//! during stage 4.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -83,10 +89,21 @@ pub fn build_command(target: &Target, args: &[String], file: &Path) -> (String, 
 
 /// Safe file name stem: letters, digits, dash and underscore only.
 pub fn sanitize(name: &str) -> String {
-    let stem = name.trim_end_matches(".tzx").trim_end_matches(".TZX").trim_end_matches(".tap").trim_end_matches(".TAP");
-    let s: String = stem.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+    let stem = name
+        .trim_end_matches(".tzx")
+        .trim_end_matches(".TZX")
+        .trim_end_matches(".tap")
+        .trim_end_matches(".TAP");
+    let s: String = stem
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
     let s = s.trim_matches('_').chars().take(40).collect::<String>();
-    if s.is_empty() { "tape".into() } else { s }
+    if s.is_empty() {
+        "tape".into()
+    } else {
+        s
+    }
 }
 
 fn is_executable(p: &Path) -> bool {
@@ -105,7 +122,8 @@ fn is_executable(p: &Path) -> bool {
 /// Directories to search for a program. GUI apps on macOS start with a minimal PATH, so the
 /// usual install locations are added explicitly.
 fn search_dirs() -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    let mut dirs: Vec<PathBuf> =
+        std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
     #[cfg(unix)]
     {
         for d in ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/usr/games", "/snap/bin"] {
@@ -157,7 +175,10 @@ fn find_fuse_app() -> Option<PathBuf> {
         return Some(p);
     }
     // Installed elsewhere: ask Spotlight by bundle id.
-    let out = Command::new("mdfind").arg(format!("kMDItemCFBundleIdentifier == '{FUSE_BUNDLE_ID}'")).output().ok()?;
+    let out = Command::new("mdfind")
+        .arg(format!("kMDItemCFBundleIdentifier == '{FUSE_BUNDLE_ID}'"))
+        .output()
+        .ok()?;
     String::from_utf8_lossy(&out.stdout).lines().map(PathBuf::from).find(|p| p.is_dir())
 }
 
@@ -199,15 +220,18 @@ fn temp_folder() -> Result<PathBuf, String> {
 }
 
 /// Emulator that "auto-detect" would use, for display in the settings dialog.
-#[tauri::command]
 pub fn detect_emulator() -> Option<String> {
     detect().map(|t| t.display())
 }
 
 /// Write `bytes` as a TZX file and open it in the emulator. Returns what was started.
 /// An empty `program` means auto-detect.
-#[tauri::command]
-pub fn open_in_emulator(bytes: Vec<u8>, name: String, program: String, args: String) -> Result<String, String> {
+pub fn open_in_emulator(
+    bytes: Vec<u8>,
+    name: String,
+    program: String,
+    args: String,
+) -> Result<String, String> {
     let target = if program.trim().is_empty() {
         detect().ok_or_else(|| "NOT_FOUND".to_string())?
     } else {
@@ -218,7 +242,10 @@ pub fn open_in_emulator(bytes: Vec<u8>, name: String, program: String, args: Str
     std::fs::write(&file, &bytes).map_err(|e| format!("Cannot write {}: {e}", file.display()))?;
 
     let (cmd, argv) = build_command(&target, &split_args(&args), &file);
-    let mut child = Command::new(&cmd).args(&argv).spawn().map_err(|e| format!("Cannot start {}: {e}", target.display()))?;
+    let mut child = Command::new(&cmd)
+        .args(&argv)
+        .spawn()
+        .map_err(|e| format!("Cannot start {}: {e}", target.display()))?;
     if matches!(target, Target::App(_)) {
         // `open` returns at once; its exit status tells whether the app could be launched.
         let status = child.wait().map_err(|e| e.to_string())?;
@@ -242,16 +269,25 @@ mod tests {
     fn splits_arguments_with_quotes() {
         assert_eq!(split_args(""), Vec::<String>::new());
         assert_eq!(split_args("  --machine  plus2a "), vec!["--machine", "plus2a"]);
-        assert_eq!(split_args(r#"--rom "/my roms/48.rom" -x ''"#), vec!["--rom", "/my roms/48.rom", "-x", ""]);
+        assert_eq!(
+            split_args(r#"--rom "/my roms/48.rom" -x ''"#),
+            vec!["--rom", "/my roms/48.rom", "-x", ""]
+        );
     }
 
     #[test]
     fn builds_commands() {
         let file = Path::new("/tmp/t.tzx");
         let prog = Target::Program(PathBuf::from("/usr/bin/fuse"));
-        assert_eq!(build_command(&prog, &["--machine".into(), "128".into()], file), ("/usr/bin/fuse".into(), vec!["--machine".into(), "128".into(), "/tmp/t.tzx".into()]));
+        assert_eq!(
+            build_command(&prog, &["--machine".into(), "128".into()], file),
+            ("/usr/bin/fuse".into(), vec!["--machine".into(), "128".into(), "/tmp/t.tzx".into()])
+        );
         let app = Target::App(PathBuf::from("/Applications/Fuse.app"));
-        assert_eq!(build_command(&app, &[], file), ("open".into(), vec!["-a".into(), "/Applications/Fuse.app".into(), "/tmp/t.tzx".into()]));
+        assert_eq!(
+            build_command(&app, &[], file),
+            ("open".into(), vec!["-a".into(), "/Applications/Fuse.app".into(), "/tmp/t.tzx".into()])
+        );
         assert_eq!(build_command(&app, &["-x".into()], file).1.last().unwrap(), "-x");
     }
 

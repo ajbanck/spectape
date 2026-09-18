@@ -5,12 +5,13 @@
 // are the ids of `COMMANDS` in `src/state/commands.ts`, which
 // `src-tauri/src/menu.rs` already shares, so the three menus cannot drift apart.
 //
-// The skeleton does not run most of the commands: activating one reports its id
-// in the status bar. Stage 4 fills them in area by area, against the parity
-// checklist in docs/rust-migration.md.
+// What an item *does* lives in `commands.rs`; what it is called, what it is
+// bound to and when it is enabled lives here, because the menu, the context
+// menu, the keyboard and the tests all have to agree on those.
 
-/// When an item is enabled. The port of the `enabled` predicates in `commands.ts`;
-/// stage 3 only knows about the tape, not about a clipboard or an undo stack.
+/// When an item is enabled: the port of the `enabled` predicates in
+/// `commands.ts`, as a table rather than as closures, so `tests/menu.rs` can
+/// read it without the rest of the app.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Need {
     /// Always enabled.
@@ -19,9 +20,42 @@ pub enum Need {
     Blocks,
     /// Needs a block under the cursor.
     Cursor,
-    /// Needs state the skeleton does not keep yet (an undo stack, a clipboard,
-    /// a second pane, a playing tape), so it is greyed out here.
-    Never,
+    /// Needs something on the undo or redo stack.
+    Undo,
+    Redo,
+    /// Needs blocks on the clipboard.
+    Clipboard,
+    /// Needs a tape that is playing.
+    Playing,
+    /// Needs the cursor on a group or loop start.
+    Collapsible,
+}
+
+/// The state the enabled rules ask about.
+#[derive(Clone, Copy, Default)]
+pub struct MenuState {
+    pub blocks: usize,
+    pub has_cursor: bool,
+    pub can_undo: bool,
+    pub can_redo: bool,
+    pub clipboard: bool,
+    pub playing: bool,
+    pub collapsible: bool,
+}
+
+impl Need {
+    pub fn met(self, s: &MenuState) -> bool {
+        match self {
+            Need::Always => true,
+            Need::Blocks => s.blocks > 0,
+            Need::Cursor => s.has_cursor,
+            Need::Undo => s.can_undo,
+            Need::Redo => s.can_redo,
+            Need::Clipboard => s.clipboard,
+            Need::Playing => s.playing,
+            Need::Collapsible => s.collapsible,
+        }
+    }
 }
 
 pub struct Item {
@@ -36,8 +70,6 @@ pub struct Item {
 }
 
 pub struct MenuDef {
-    /// Read by `build.rs`, not at runtime.
-    #[allow(dead_code)]
     pub title: &'static str,
     pub items: &'static [Item],
 }
@@ -54,7 +86,7 @@ const fn sep() -> Item {
     Item { id: "", label: "", keys: "", check: false, need: Need::Always }
 }
 
-use Need::{Always, Blocks, Cursor, Never};
+use Need::{Always, Blocks, Clipboard, Cursor, Playing, Redo, Undo};
 
 pub const MENUS: &[MenuDef] = &[
     MenuDef {
@@ -74,12 +106,12 @@ pub const MENUS: &[MenuDef] = &[
     MenuDef {
         title: "Edit",
         items: &[
-            cmd("undo", "Undo", "CmdOrCtrl+Z", Never),
-            cmd("redo", "Redo", "CmdOrCtrl+Shift+Z", Never),
+            cmd("undo", "Undo", "CmdOrCtrl+Z", Undo),
+            cmd("redo", "Redo", "CmdOrCtrl+Shift+Z", Redo),
             sep(),
             cmd("cut", "Cut", "CmdOrCtrl+X", Cursor),
             cmd("copy", "Copy", "CmdOrCtrl+C", Cursor),
-            cmd("paste", "Paste", "CmdOrCtrl+V", Never),
+            cmd("paste", "Paste", "CmdOrCtrl+V", Clipboard),
             cmd("duplicate", "Duplicate Block", "CmdOrCtrl+D", Cursor),
             cmd("delete", "Delete Block", "", Cursor),
             sep(),
@@ -102,7 +134,7 @@ pub const MENUS: &[MenuDef] = &[
             cmd("select-program", "Select Program", "CmdOrCtrl+Shift+A", Cursor),
             cmd("extract", "Extract to Other Pane", "CmdOrCtrl+Shift+E", Cursor),
             sep(),
-            cmd("find-match", "Find Match", "CmdOrCtrl+F", Never),
+            cmd("find-match", "Find Match", "CmdOrCtrl+F", Cursor),
             cmd("set-timings", "Set Selection Timings to Current", "", Cursor),
         ],
     },
@@ -110,9 +142,9 @@ pub const MENUS: &[MenuDef] = &[
         title: "Tape",
         items: &[
             cmd("play", "Play Tape", "", Blocks),
-            cmd("play-cursor", "Play from Cursor", "CmdOrCtrl+P", Cursor),
-            cmd("play-selection", "Play Selection", "", Cursor),
-            cmd("stop", "Stop Playback", "CmdOrCtrl+.", Never),
+            cmd("play-cursor", "Play from Cursor", "CmdOrCtrl+P", Blocks),
+            cmd("play-selection", "Play Selection", "", Blocks),
+            cmd("stop", "Stop Playback", "CmdOrCtrl+.", Playing),
             sep(),
             cmd("emu-tape", "Open Tape in Emulator", "CmdOrCtrl+R", Blocks),
             cmd("emu-cursor", "Open from Cursor in Emulator", "CmdOrCtrl+Shift+R", Cursor),
@@ -121,10 +153,10 @@ pub const MENUS: &[MenuDef] = &[
             cmd("programs", "Programs…", "CmdOrCtrl+J", Blocks),
             cmd("tape-info", "Tape Info…", "CmdOrCtrl+I", Blocks),
             cmd("consistency", "Check Consistency…", "CmdOrCtrl+K", Blocks),
-            cmd("compare", "Compare Tapes", "", Never),
-            cmd("clear-compare", "Clear Compare Marks", "", Never),
+            cmd("compare", "Compare Tapes", "", Always),
+            cmd("clear-compare", "Clear Compare Marks", "", Always),
             sep(),
-            cmd("switch-pane", "Switch Active Pane", "CmdOrCtrl+`", Never),
+            cmd("switch-pane", "Switch Active Pane", "CmdOrCtrl+`", Always),
             cmd("toggle-lock", "Toggle Lock", "CmdOrCtrl+L", Always),
         ],
     },
@@ -147,28 +179,24 @@ pub const MENUS: &[MenuDef] = &[
     },
 ];
 
-/// Flat index of every item, the way the generated markup addresses them.
-#[allow(dead_code)]
+/// Flat index of every item, the order `menu.rs` addresses them in.
 pub fn flat() -> Vec<&'static Item> {
     MENUS.iter().flat_map(|m| m.items.iter()).collect()
 }
 
-/// A guard against the two readers disagreeing: both use this order.
+/// A guard against the two readers disagreeing: both use this order. Read by
+/// `tests/menu.rs` and by the in-window menu bar.
 #[allow(dead_code)]
 pub fn item_count() -> usize {
     MENUS.iter().map(|m| m.items.len()).sum()
 }
 
+/// The table entry for a command id, wherever it is shown.
+pub fn item(id: &str) -> Option<&'static Item> {
+    MENUS.iter().flat_map(|m| m.items.iter()).find(|i| i.id == id)
+}
+
 /// Enabled state for every item, in flat order.
-#[allow(dead_code)]
-pub fn enabled_flags(blocks: usize, has_cursor: bool) -> Vec<bool> {
-    flat()
-        .iter()
-        .map(|i| match i.need {
-            Need::Always => true,
-            Need::Blocks => blocks > 0,
-            Need::Cursor => has_cursor,
-            Need::Never => false,
-        })
-        .collect()
+pub fn enabled_flags(state: &MenuState) -> Vec<bool> {
+    flat().iter().map(|i| i.need.met(state)).collect()
 }

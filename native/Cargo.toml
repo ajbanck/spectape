@@ -14,6 +14,21 @@ path = "src/main.rs"
 eframe = { version = "0.36", default-features = false, features = ["glow", "wayland", "x11"] }
 egui = "0.36"
 spectape-core = { path = "../core" }
+# Native file dialogs (open/save/pick a program), the rfd the Tauri build reaches
+# through its dialog plugin.
+rfd = "0.16"
+# Audio out. The web build hands its samples to Web Audio; here they go to the
+# default output device.
+cpal = "0.18"
+# Inflating Z-RLE CSW blocks: the core is dependency-free on purpose, so zlib
+# lives on this side, the way the web build uses pako.
+miniz_oxide = "0.9"
+# "Save PNG" in the screen view.
+png = "0.18"
+# The system clipboard, for Paste into a focused text field: on macOS the menu
+# owns ⌘V, so the keystroke eframe would have turned into a paste never arrives.
+# Already in the tree — eframe uses it for the same job.
+arboard = { version = "3.6", default-features = false }
 
 # The platform's own menu bar. The same crate Tauri uses in src-tauri/src/menu.rs,
 # and the same one Slint called on macOS; here it is called directly.

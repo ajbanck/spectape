@@ -5,9 +5,10 @@
 //! shell's menu is the menu SpecTape already has — accelerators included, with
 //! `CmdOrCtrl+S` meaning ⌘S here and Ctrl+S on Windows.
 //!
-//! Elsewhere the menu is drawn inside the window by egui (`fallback_bar`). On
-//! Windows that is temporary: muda wants `init_for_hwnd`, which needs the window
-//! handle out of eframe, and it belongs with the rest of the Windows work.
+//! Elsewhere the menu is drawn inside the window by egui, from the same table,
+//! and `app.rs` handles the accelerators itself. On Windows muda would want
+//! `init_for_hwnd` with the window handle out of eframe; until that is done the
+//! egui bar is what Windows gets too.
 //!
 //! Clicks arrive on muda's own thread, so they land in a queue and wake the UI;
 //! `take_activated` drains it at the top of a frame.
@@ -42,9 +43,13 @@ mod native {
         /// One entry per flat index of `menutable::flat()`, so the app can address
         /// items the way the table lists them.
         handles: Vec<Handle>,
-        /// Kept alive: dropping the menu takes it off the menu bar.
-        _bar: MudaMenu,
+        /// Kept alive: dropping the menu takes it off the menu bar. `None` in the
+        /// headless menu the tests draw frames with, where there is no NSApp to
+        /// hang a menu bar on.
+        _bar: Option<MudaMenu>,
         queue: Queue,
+        /// What was last pushed, so an unchanged frame touches nothing.
+        last: std::cell::RefCell<(Vec<bool>, Vec<bool>)>,
     }
 
     fn accelerator(item: &Item) -> Option<Accelerator> {
@@ -117,23 +122,37 @@ mod native {
                 ctx.request_repaint();
             }));
 
-            Menu { handles, _bar: bar, queue }
+            Menu { handles, _bar: Some(bar), queue, last: std::cell::RefCell::new((Vec::new(), Vec::new())) }
         }
 
-        pub fn set_enabled(&self, flags: &[bool]) {
-            for (h, on) in self.handles.iter().zip(flags) {
+        /// A menu that talks to no platform, for drawing frames in a test.
+        #[allow(dead_code)]
+        pub fn headless() -> Self {
+            Menu {
+                handles: Vec::new(),
+                _bar: None,
+                queue: Queue::default(),
+                last: std::cell::RefCell::new((Vec::new(), Vec::new())),
+            }
+        }
+
+        /// Push enabled and checked state, skipping the frames where nothing moved.
+        pub fn set_state(&self, enabled: &[bool], checked: &[bool]) {
+            let mut last = self.last.borrow_mut();
+            if last.0 == enabled && last.1 == checked {
+                return;
+            }
+            for (i, h) in self.handles.iter().enumerate() {
                 match h {
-                    Handle::Item(i) => i.set_enabled(*on),
-                    Handle::Check(i) => i.set_enabled(*on),
+                    Handle::Item(it) => it.set_enabled(enabled[i]),
+                    Handle::Check(it) => {
+                        it.set_enabled(enabled[i]);
+                        it.set_checked(checked[i]);
+                    }
                     Handle::Separator => {}
                 }
             }
-        }
-
-        pub fn set_checked(&self, flat: usize, on: bool) {
-            if let Some(Handle::Check(i)) = self.handles.get(flat) {
-                i.set_checked(on);
-            }
+            *last = (enabled.to_vec(), checked.to_vec());
         }
 
         pub fn take_activated(&self) -> Vec<String> {
@@ -145,35 +164,38 @@ mod native {
 #[cfg(not(target_os = "macos"))]
 mod native {
     use super::*;
+    use crate::menutable::MenuState;
+    use crate::theme::Tokens;
 
     pub struct Menu {
-        enabled: std::cell::RefCell<Vec<bool>>,
         checked: std::cell::RefCell<Vec<bool>>,
         queue: Queue,
     }
 
     impl Menu {
         pub fn new(_ctx: &egui::Context) -> Self {
-            let n = crate::menutable::item_count();
-            Menu { enabled: vec![true; n].into(), checked: vec![false; n].into(), queue: Queue::default() }
+            Menu { checked: vec![false; crate::menutable::item_count()].into(), queue: Queue::default() }
         }
 
-        pub fn set_enabled(&self, flags: &[bool]) {
-            self.enabled.replace(flags.to_vec());
+        /// A menu that talks to no platform, for drawing frames in a test.
+        #[allow(dead_code)]
+        pub fn headless() -> Self {
+            Menu { checked: Vec::new().into(), queue: Queue::default() }
         }
 
-        pub fn set_checked(&self, flat: usize, on: bool) {
-            self.checked.borrow_mut()[flat] = on;
+        pub fn set_state(&self, _enabled: &[bool], checked: &[bool]) {
+            self.checked.replace(checked.to_vec());
         }
 
         pub fn take_activated(&self) -> Vec<String> {
             self.queue.take()
         }
 
-        /// The in-window menu bar, drawn from the same table.
-        pub fn bar(&self, ui: &mut egui::Ui) {
-            let enabled = self.enabled.borrow();
+        /// The in-window menu bar, drawn from the same table. Returns the id
+        /// clicked this frame, if any.
+        pub fn bar(&self, ui: &mut egui::Ui, state: &MenuState, tok: &Tokens) -> Option<String> {
             let checked = self.checked.borrow();
+            let mut fired = None;
             egui::MenuBar::new().ui(ui, |ui| {
                 // The base index of each menu is counted outside the button, because
                 // a closed menu never runs its closure.
@@ -193,15 +215,17 @@ mod native {
                             } else {
                                 item.label.to_string()
                             };
-                            let button = egui::Button::new(label).shortcut_text(item.keys);
-                            if ui.add_enabled(enabled[at], button).clicked() {
-                                self.queue.0.lock().unwrap().push(item.id.to_string());
+                            let button = egui::Button::new(label).shortcut_text(crate::fmt::accel(item.keys));
+                            if ui.add_enabled(item.need.met(state), button).clicked() {
+                                fired = Some(item.id.to_string());
                                 ui.close();
                             }
                         }
                     });
                 }
+                let _ = tok;
             });
+            fired
         }
     }
 }
