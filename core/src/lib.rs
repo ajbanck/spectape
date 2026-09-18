@@ -4,12 +4,16 @@
 //! plus the wasm ABI (`wasm`) and the byte format (`wire`) the TypeScript app
 //! calls them through.
 
+pub mod bits;
 pub mod bytes;
+pub mod compare;
 pub mod consistency;
 pub mod content;
+pub mod convert;
 pub mod describe;
 pub mod dump;
 pub mod parser;
+pub mod pokes;
 pub mod programs;
 pub mod types;
 pub mod wasm;

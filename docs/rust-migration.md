@@ -159,7 +159,14 @@ implementations before the TypeScript goes away:
    `test/reference/`. 75 TypeScript tests and 27 Rust ones, the differential ones comparing every
    block of every sample tape, the awkward content cases, twenty consistency tapes and ten
    program layouts
-3. `compare.ts`, `convert.ts`, `pokes.ts`, `bits.ts`
+3. ~~`compare.ts`, `convert.ts`, `pokes.ts`, `bits.ts`~~ — **done** 2026-09-18.
+   `core/src/{compare,convert,pokes,bits}.rs`, with `create_body` (the port of `createBlock`)
+   added to `types.rs` because the type conversion needs it. The TypeScript's duck-typed field
+   copying became an explicit carry-over table, and the POKEs line grammar, one regular
+   expression there, is read by hand here — the crate still has no dependencies. 82 TypeScript
+   tests and 32 Rust ones; the differential test converts between every pair of block types,
+   compares every tape pair in all nine mode combinations, and parses a corpus of POKEs text
+   including the lines that must fail
 4. `spectrum/basic.ts`, `screen.ts`, `disasm.ts`, `charset.ts`
 5. `audio.ts` last — the preallocated-buffer behaviour and `playbackTimeline` are subtle, and the
    existing tests compare against the previous algorithm bit-for-bit
@@ -168,16 +175,17 @@ implementations before the TypeScript goes away:
 through the existing app, and the browser version still works.
 
 **What stays in TypeScript until stage 4:** predicates and slices over the block model that the
-UI asks for per row and that carry no logic — `isMetadata`, `blockBody`, `payload`, and the
-`isDataBlock`/`hasData` pair that was always in `types.ts`. Crossing into wasm to drop two bytes
+UI asks for per row and that carry no logic — `isMetadata`, `blockBody`, `payload`, `totalBits`,
+and the `isDataBlock`/`hasData` pair that was always in `types.ts`. Crossing into wasm to drop two bytes
 costs more than it saves. The core has its own copy of each, and both sides assert the same table
 (`core/tests/logic.rs` and `test/core.test.ts`), so the copies cannot drift apart.
 
-**Bundle so far:** 187.56 kB before stage 1, 253.20 kB after the parser, 335.10 kB after the
-writer and module 2 (122.76 kB gzipped). The wasm itself is 119 KB. Most of the growth is Rust's
-formatting machinery rather than our code — the padded-hex helper costs 106 bytes of it — and
-`wasm-opt`, which usually trims 10–20%, is not installed here. Still inside the 200–400 kB the
-plan budgeted, with three modules to go; worth re-measuring at the end of the stage.
+**Bundle so far:** 187.56 kB before stage 1, then 253.20 after the parser, 335.10 after the
+writer and module 2, and 372.00 kB after module 3 (135.93 kB gzipped). That is 184 kB of growth
+with two module groups left, against the 200–400 kB the plan budgeted for all of it, so the top
+of that range is the realistic landing point. Most of the growth is Rust's formatting machinery
+rather than our code — the padded-hex helper costs 106 bytes of it — and `wasm-opt`, which
+usually trims 10–20%, is not installed here. Worth a serious look at the end of the stage.
 
 **What the boundary costs, measured on a 3,000-block, 1.2 MB tape** (the size the plan measures
 rendering with): the app encodes the blocks onto the wire for every call, so calls that the UI

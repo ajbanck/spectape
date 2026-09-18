@@ -1,67 +1,46 @@
-// Bit-stream helpers for the data window's Drop / Add / Shift operations.
+// Bit-stream helpers for the data window's Drop / Add / Shift operations. The
+// operations are the Rust core in core/ (bits.rs).
+//
+// The previous implementation lives on as test/reference/bits.ts.
+import { BitData } from './types';
+import { bitsCore, flipBytesCore } from './core';
 
-export interface BitData {
-  data: Uint8Array;
-  usedBits: number; // used bits in the last byte (1-8); ignored when data is empty
-}
+export type { BitData };
 
+/**
+ * How many bits the stream holds.
+ *
+ * Stays in TypeScript: arithmetic on two numbers the caller already has, which
+ * the data window asks for on every render. `bits.rs` has the same function for
+ * the core's own use, and both sides assert the same table.
+ */
 export function totalBits(d: BitData): number {
   if (d.data.length === 0) return 0;
   return (d.data.length - 1) * 8 + Math.max(1, Math.min(8, d.usedBits));
 }
 
-export function getBit(d: Uint8Array, i: number): number {
-  return (d[i >> 3] >> (7 - (i & 7))) & 1;
-}
-
-/** Build a byte array from a bit provider. */
-export function fromBits(n: number, bit: (i: number) => number): BitData {
-  const len = Math.ceil(n / 8);
-  const out = new Uint8Array(len);
-  for (let i = 0; i < n; i++) if (bit(i)) out[i >> 3] |= 0x80 >> (i & 7);
-  const used = n === 0 ? 8 : n - (len - 1) * 8;
-  return { data: out, usedBits: used };
-}
-
 export function dropBits(d: BitData, n: number): BitData {
-  const total = Math.max(0, totalBits(d) - n);
-  return fromBits(total, (i) => getBit(d.data, i));
+  return bitsCore('drop', [d], n);
 }
+
 export function addBits(d: BitData, n: number): BitData {
-  const before = totalBits(d);
-  return fromBits(before + n, (i) => (i < before ? getBit(d.data, i) : 0));
+  return bitsCore('add', [d], n);
 }
+
 export function shiftLeftBits(d: BitData, n: number): BitData {
-  const total = Math.max(0, totalBits(d) - n);
-  return fromBits(total, (i) => getBit(d.data, i + n));
+  return bitsCore('shiftLeft', [d], n);
 }
+
 export function shiftRightBits(d: BitData, n: number): BitData {
-  const before = totalBits(d);
-  return fromBits(before + n, (i) => (i < n ? 0 : getBit(d.data, i - n)));
+  return bitsCore('shiftRight', [d], n);
 }
 
 /** Concatenate several bit streams (used by "view selected as one"). */
 export function joinBits(parts: BitData[]): BitData {
-  const lens = parts.map(totalBits);
-  const total = lens.reduce((a, b) => a + b, 0);
-  return fromBits(total, (i) => {
-    let k = 0;
-    while (k < parts.length && i >= lens[k]) {
-      i -= lens[k];
-      k++;
-    }
-    return getBit(parts[k].data, i);
-  });
+  return bitsCore('join', parts);
 }
 
+/** Reverse the bits of every byte. */
 export function flipBytes(d: Uint8Array): Uint8Array {
-  const out = new Uint8Array(d.length);
-  for (let i = 0; i < d.length; i++) {
-    let v = d[i];
-    v = ((v & 0xf0) >> 4) | ((v & 0x0f) << 4);
-    v = ((v & 0xcc) >> 2) | ((v & 0x33) << 2);
-    v = ((v & 0xaa) >> 1) | ((v & 0x55) << 1);
-    out[i] = v;
-  }
-  return out;
+  return flipBytesCore(d);
 }

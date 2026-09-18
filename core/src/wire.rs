@@ -531,6 +531,19 @@ fn put_header(w: &mut Vec<u8>, h: &crate::describe::HeaderInfo) {
     u16v(w, h.param2);
 }
 
+fn opt_u32(w: &mut Vec<u8>, v: Option<u32>) {
+    match v {
+        Some(n) => {
+            w.push(1);
+            u32v(w, n as usize);
+        }
+        None => {
+            w.push(0);
+            u32v(w, 0);
+        }
+    }
+}
+
 fn opt_u16(w: &mut Vec<u8>, v: Option<u16>) {
     match v {
         Some(n) => {
@@ -539,4 +552,103 @@ fn opt_u16(w: &mut Vec<u8>, v: Option<u16>) {
         }
         None => w.push(0),
     }
+}
+
+/// A block list as an answer, for the calls that hand blocks back.
+pub fn encode_blocks_answer(blocks: &[Block]) -> Vec<u8> {
+    let mut w = header();
+    encode_blocks_into(&mut w, blocks);
+    w
+}
+
+/// `[u32 count]` then that many `u32`s.
+pub fn encode_u32s(values: &[u32]) -> Vec<u8> {
+    let mut w = header();
+    u32v(&mut w, values.len());
+    for v in values {
+        u32v(&mut w, *v as usize);
+    }
+    w
+}
+
+/// Two result lists and whether the tapes matched.
+pub fn encode_comparison(
+    left: &[crate::compare::CompareResult],
+    right: &[crate::compare::CompareResult],
+    identical: bool,
+) -> Vec<u8> {
+    let mut w = header();
+    for side in [left, right] {
+        u32v(&mut w, side.len());
+        for r in side {
+            w.push(match r {
+                crate::compare::CompareResult::Same => 0,
+                crate::compare::CompareResult::Diff => 1,
+                crate::compare::CompareResult::Ignored => 2,
+            });
+        }
+    }
+    w.push(identical as u8);
+    w
+}
+
+/// A bit stream: its bytes and how many bits of the last one are used.
+pub fn encode_bit_data(d: &crate::bits::BitData) -> Vec<u8> {
+    let mut w = header();
+    bytes(&mut w, &d.data);
+    w.push(d.used_bits);
+    w
+}
+
+/// One or more bit streams arriving from JavaScript.
+pub fn decode_bit_data(buf: &[u8]) -> ReadResult<Vec<crate::bits::BitData>> {
+    let mut r = Reader::new(buf);
+    let count = r.u32()? as usize;
+    let mut out = Vec::with_capacity(count.min(1024));
+    for _ in 0..count {
+        let data = read_bytes(&mut r)?;
+        out.push(crate::bits::BitData { data, used_bits: r.u8()? });
+    }
+    Ok(out)
+}
+
+pub fn encode_pokes_info(info: &crate::pokes::PokesInfo) -> Vec<u8> {
+    let mut w = header();
+    string(&mut w, &info.description);
+    u32v(&mut w, info.trainers.len());
+    for t in &info.trainers {
+        string(&mut w, &t.description);
+        u32v(&mut w, t.pokes.len());
+        for p in &t.pokes {
+            opt_u32(&mut w, p.page);
+            u32v(&mut w, p.addr as usize);
+            opt_u32(&mut w, p.value);
+            opt_u32(&mut w, p.original);
+        }
+    }
+    w
+}
+
+pub fn decode_pokes_info(buf: &[u8]) -> ReadResult<crate::pokes::PokesInfo> {
+    let mut r = Reader::new(buf);
+    let description = read_str(&mut r)?;
+    let mut trainers = Vec::new();
+    for _ in 0..r.u32()? {
+        let description = read_str(&mut r)?;
+        let mut pokes = Vec::new();
+        for _ in 0..r.u32()? {
+            let opt = |r: &mut Reader| -> ReadResult<Option<u32>> {
+                let present = r.u8()? == 1;
+                let value = r.u32()?;
+                Ok(if present { Some(value) } else { None })
+            };
+            let page = opt(&mut r)?;
+            let addr = r.u32()?;
+            let value = opt(&mut r)?;
+            let original = opt(&mut r)?;
+            pokes.push(crate::pokes::Poke { page, addr, value, original });
+        }
+        trainers.push(crate::pokes::Trainer { description, pokes });
+    }
+    Ok(crate::pokes::PokesInfo { description, trainers })
 }

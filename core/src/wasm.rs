@@ -7,16 +7,22 @@
 //! pointer followed by that many bytes of [`crate::wire`] payload, then frees
 //! both with [`core_free`]. `src/tzx/core.ts` is the other end.
 
+use crate::bits::{add_bits, drop_bits, flip_bytes, join_bits, shift_left_bits, shift_right_bits, BitData};
+use crate::compare::{blocks_equal, compare_tapes, find_matches, BlockCompareMode, TapeCompareMode};
 use crate::consistency::check_consistency;
 use crate::content::{basic_score, content_labels, detect_content};
+use crate::convert::convert_block;
 use crate::describe::{block_length, checksum, decode_header, describe_block, encode_header};
 use crate::parser::{parse_tap, parse_tape, parse_tzx, ParsedTape};
+use crate::pokes::{decode_pokes, encode_pokes, pokes_to_text, text_to_pokes};
 use crate::programs::{detect_programs, group_ranges, tape_title};
 use crate::types::Block;
 use crate::wire::{
-    decode_blocks, decode_header_info, encode_bytes, encode_content, encode_described, encode_error,
-    encode_f64, encode_header_info, encode_issues, encode_opt_string, encode_programs, encode_ranges,
-    encode_strings, encode_tap, encode_tape, encode_u8, encode_version, WIRE_VERSION,
+    decode_bit_data, decode_blocks, decode_header_info, decode_pokes_info, encode_bit_data,
+    encode_blocks_answer, encode_bytes, encode_comparison, encode_content, encode_described, encode_error,
+    encode_f64, encode_header_info, encode_issues, encode_opt_string, encode_pokes_info, encode_programs,
+    encode_ranges, encode_strings, encode_tap, encode_tape, encode_u32s, encode_u8, encode_version,
+    WIRE_VERSION,
 };
 use crate::writer::{required_version, save_version, serialize_block, serialize_tap, serialize_tzx, Version};
 use std::alloc::{alloc, dealloc, Layout};
@@ -317,5 +323,168 @@ unsafe fn slice<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
         &[]
     } else {
         std::slice::from_raw_parts(ptr, len)
+    }
+}
+
+// ---- converting, comparing, bits and POKEs --------------------------------
+
+/// Convert the first block of the payload to block type `id`.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_convert_block(ptr: *const u8, len: usize, id: u32) -> *mut u8 {
+    with_blocks(ptr, len, |blocks| match blocks.first() {
+        Some(b) => encode_blocks_answer(&[convert_block(b, id as u8)]),
+        None => encode_blocks_answer(&[]),
+    })
+}
+
+/// Are the payload's two blocks equal under this compare mode?
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_blocks_equal(ptr: *const u8, len: usize, mode: u32) -> *mut u8 {
+    with_blocks(ptr, len, |blocks| match blocks {
+        [a, b, ..] => encode_u8(blocks_equal(a, b, block_mode(mode)) as u8),
+        _ => encode_u8(0),
+    })
+}
+
+/// Compare two tapes sent as one list: `split` blocks of left, then right.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_compare_tapes(
+    ptr: *const u8,
+    len: usize,
+    split: u32,
+    block_mode_id: u32,
+    tape_mode_id: u32,
+) -> *mut u8 {
+    with_blocks(ptr, len, |blocks| {
+        let split = (split as usize).min(blocks.len());
+        let (left, right) = blocks.split_at(split);
+        let (l, r, identical) =
+            compare_tapes(left, right, block_mode(block_mode_id), tape_mode(tape_mode_id));
+        encode_comparison(&l, &r, identical)
+    })
+}
+
+/// Blocks of the payload matching its first block, which is the needle. `skip`
+/// is where the needle sits in the haystack, or `0xffff_ffff` when it is not in
+/// it; the haystack starts at the payload's second block.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_find_matches(ptr: *const u8, len: usize, skip: u32, mode: u32) -> *mut u8 {
+    with_blocks(ptr, len, |blocks| match blocks.split_first() {
+        Some((needle, haystack)) => {
+            let skip = if skip == u32::MAX { None } else { Some(skip as usize) };
+            encode_u32s(&find_matches(needle, haystack, block_mode(mode), skip))
+        }
+        None => encode_u32s(&[]),
+    })
+}
+
+/// Drop, add or shift bits of the payload's bit stream, or join all of them.
+/// `op` is 0 drop, 1 add, 2 shift left, 3 shift right, 4 join.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded bit streams.
+#[no_mangle]
+pub unsafe extern "C" fn core_bits(ptr: *const u8, len: usize, op: u32, n: u32) -> *mut u8 {
+    let payload = match decode_bit_data(slice(ptr, len)) {
+        Ok(parts) => {
+            let n = n as usize;
+            let first = parts.first().cloned().unwrap_or(BitData { data: Vec::new(), used_bits: 8 });
+            let out = match op {
+                0 => drop_bits(&first, n),
+                1 => add_bits(&first, n),
+                2 => shift_left_bits(&first, n),
+                3 => shift_right_bits(&first, n),
+                _ => join_bits(&parts),
+            };
+            encode_bit_data(&out)
+        }
+        Err(e) => encode_error(&e.0),
+    };
+    finish(payload)
+}
+
+/// Reverse the bits of every byte.
+///
+/// # Safety
+/// `ptr` must point at `len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn core_flip_bytes(ptr: *const u8, len: usize) -> *mut u8 {
+    finish(encode_bytes(&flip_bytes(slice(ptr, len))))
+}
+
+/// Read a 'POKEs' custom info block.
+///
+/// # Safety
+/// `ptr` must point at `len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn core_decode_pokes(ptr: *const u8, len: usize) -> *mut u8 {
+    finish(match decode_pokes(slice(ptr, len)) {
+        Ok(info) => encode_pokes_info(&info),
+        Err(e) => encode_error(&e.0),
+    })
+}
+
+/// Write a 'POKEs' custom info block.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded POKEs.
+#[no_mangle]
+pub unsafe extern "C" fn core_encode_pokes(ptr: *const u8, len: usize) -> *mut u8 {
+    finish(match decode_pokes_info(slice(ptr, len)) {
+        Ok(info) => encode_bytes(&encode_pokes(&info)),
+        Err(e) => encode_error(&e.0),
+    })
+}
+
+/// The editor's text for these POKEs.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded POKEs.
+#[no_mangle]
+pub unsafe extern "C" fn core_pokes_to_text(ptr: *const u8, len: usize, hex: u32) -> *mut u8 {
+    finish(match decode_pokes_info(slice(ptr, len)) {
+        Ok(info) => encode_opt_string(Some(&pokes_to_text(&info, hex != 0))),
+        Err(e) => encode_error(&e.0),
+    })
+}
+
+/// Parse the editor's text back into POKEs; a bad line comes back as an error.
+///
+/// # Safety
+/// `ptr` must point at `len` readable bytes of Latin-1 text.
+#[no_mangle]
+pub unsafe extern "C" fn core_text_to_pokes(ptr: *const u8, len: usize, hex: u32) -> *mut u8 {
+    let text = crate::bytes::latin1_to_string(slice(ptr, len));
+    finish(match text_to_pokes(&text, hex != 0) {
+        Ok(info) => encode_pokes_info(&info),
+        Err(message) => encode_error(&message),
+    })
+}
+
+fn block_mode(id: u32) -> BlockCompareMode {
+    match id {
+        0 => BlockCompareMode::Data,
+        2 => BlockCompareMode::DataTimingsPauses,
+        _ => BlockCompareMode::DataTimings,
+    }
+}
+
+fn tape_mode(id: u32) -> TapeCompareMode {
+    match id {
+        0 => TapeCompareMode::DataBlocks,
+        2 => TapeCompareMode::All,
+        _ => TapeCompareMode::IgnoreMetadata,
     }
 }

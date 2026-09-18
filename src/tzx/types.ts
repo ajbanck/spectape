@@ -243,6 +243,33 @@ export interface Program {
   source: 'header' | 'group' | 'select' | 'tape';
 }
 
+/** How much of two blocks has to match for the compare modes to call them equal. */
+export type BlockCompareMode = 'data' | 'data+timings' | 'data+timings+pauses';
+export type TapeCompareMode = 'datablocks' | 'ignore-metadata' | 'all';
+export type CompareResult = 'same' | 'diff' | 'ignored' | 'match' | 'none';
+
+/** A bit stream: bytes plus how many bits of the last one count. */
+export interface BitData {
+  data: Uint8Array;
+  usedBits: number; // used bits in the last byte (1-8); ignored when data is empty
+}
+
+/** One POKE of a trainer in a 'POKEs' custom info block. */
+export interface Poke {
+  page: number | null;
+  addr: number;
+  value: number | null; // null = user inserts
+  original: number | null;
+}
+export interface Trainer {
+  description: string;
+  pokes: Poke[];
+}
+export interface PokesInfo {
+  description: string;
+  trainers: Trainer[];
+}
+
 /** What a parse returns: the blocks, the file's TZX version and any complaints. */
 export interface ParsedTape {
   blocks: Block[];

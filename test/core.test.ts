@@ -16,6 +16,14 @@ import { checkConsistency as coreCheck } from '../src/tzx/consistency';
 import { checkConsistency as refCheck } from './reference/consistency';
 import * as corePrograms from '../src/tzx/programs';
 import * as refPrograms from './reference/programs';
+import * as coreCompare from '../src/tzx/compare';
+import * as refCompare from './reference/compare';
+import { convertBlock as coreConvert } from '../src/tzx/convert';
+import { convertBlock as refConvert } from './reference/convert';
+import * as coreBits from '../src/tzx/bits';
+import * as refBits from './reference/bits';
+import * as corePokes from '../src/tzx/pokes';
+import * as refPokes from './reference/pokes';
 import { serializeTzx, serializeTap } from '../src/tzx/writer';
 import { Block, CREATABLE_IDS, ParsedTape, createBlock, isDataBlock } from '../src/tzx/types';
 import { encodeHeader } from '../src/tzx/describe';
@@ -415,6 +423,175 @@ describe('the Rust descriptions, detection and structure against the TypeScript 
       expect([...corePrograms.groupRanges(blocks)]).toEqual([...refPrograms.groupRanges(blocks)]);
       expect(corePrograms.detectPrograms(blocks)).toEqual(refPrograms.detectPrograms(blocks));
       expect(corePrograms.tapeTitle(blocks)).toEqual(refPrograms.tapeTitle(blocks));
+    }
+  });
+});
+
+describe('the Rust conversion, comparison, bits and POKEs against the TypeScript they replaced', () => {
+  const sig = Array.from('ZXTape!\x1a').map((c) => c.charCodeAt(0));
+
+  /** One block of every type, with content, plus an unknown one. */
+  function specimens(): Block[] {
+    const blocks: Block[] = CREATABLE_IDS.map((id) => createBlock(id));
+    for (const b of blocks) if ('data' in b) (b as any).data = new Uint8Array([0x00, 1, 2, 3, 0x55]);
+    const turbo = blocks.find((b) => b.id === 0x11)! as any;
+    Object.assign(turbo, { pilot: 2000, sync1: 600, sync2: 700, zero: 800, one: 1600, pilotLen: 3000 });
+    (blocks.find((b) => b.id === 0x21) as any).name = 'Level 2';
+    (blocks.find((b) => b.id === 0x30) as any).text = 'Hello';
+    (blocks.find((b) => b.id === 0x31) as any).text = 'Press play';
+    return [
+      ...blocks,
+      { ...createBlock(0x10), data: new Uint8Array([0xff, 1]) } as Block,  // data, not header
+      { ...createBlock(0x10), pause: 1234, data: new Uint8Array(0) } as Block,
+      ...core.parseTzx(new Uint8Array([...sig, 1, 20, 0x5b, 2, 0, 0, 0, 7, 8])).blocks,
+    ];
+  }
+
+  it('converts between every pair of block types the same way', () => {
+    for (const b of specimens()) {
+      for (const id of CREATABLE_IDS) {
+        const got = coreConvert(b, id);
+        const want = refConvert(b, id);
+        expect(JSON.stringify(got, replacer)).toEqual(JSON.stringify(want, replacer));
+        expect(got.uid).toBe(b.uid);
+      }
+    }
+  });
+
+  it('compares blocks the same way in every mode', () => {
+    const blocks = specimens();
+    const modes = ['data', 'data+timings', 'data+timings+pauses'] as const;
+    for (const mode of modes) {
+      for (const a of blocks) {
+        for (const b of blocks) {
+          expect(coreCompare.blocksEqual(a, b, mode)).toBe(refCompare.blocksEqual(a, b, mode));
+        }
+      }
+    }
+    // Same block type, different pause: equal until pauses count.
+    const x = { ...createBlock(0x10), pause: 1, data: new Uint8Array([1]) } as Block;
+    const y = { ...createBlock(0x10), pause: 2, data: new Uint8Array([1]) } as Block;
+    expect(coreCompare.blocksEqual(x, y, 'data+timings')).toBe(true);
+    expect(coreCompare.blocksEqual(x, y, 'data+timings+pauses')).toBe(false);
+  });
+
+  it('compares tapes the same way in every mode', () => {
+    const b = (id: number, fields: Record<string, unknown> = {}) => Object.assign(createBlock(id), fields) as Block;
+    const tapes: Block[][] = [
+      [],
+      [b(0x10, { data: new Uint8Array([1, 2]) })],
+      [b(0x10, { data: new Uint8Array([1, 2]) }), b(0x20)],
+      [b(0x30, { text: 'note' }), b(0x10, { data: new Uint8Array([1, 2]) })],
+      [b(0x10, { data: new Uint8Array([9]) }), b(0x10, { data: new Uint8Array([1, 2]) })],
+      core.parseTape(sample('SpecTape demo.tzx')).blocks,
+      core.parseTape(sample('SpecTape demo (variant).tzx')).blocks,
+    ];
+    const blockModes = ['data', 'data+timings', 'data+timings+pauses'] as const;
+    const tapeModes = ['datablocks', 'ignore-metadata', 'all'] as const;
+    for (const left of tapes) {
+      for (const right of tapes) {
+        for (const bm of blockModes) {
+          for (const tm of tapeModes) {
+            expect(coreCompare.compareTapes(left, right, bm, tm)).toEqual(refCompare.compareTapes(left, right, bm, tm));
+          }
+        }
+      }
+    }
+  });
+
+  it('finds the same matching blocks', () => {
+    const blocks = core.parseTape(sample('SpecTape demo.tzx')).blocks;
+    for (const needle of blocks) {
+      expect(coreCompare.findMatches(needle, blocks, 'data')).toEqual(refCompare.findMatches(needle, blocks, 'data'));
+      expect(coreCompare.findMatches(needle, blocks, 'data+timings')).toEqual(refCompare.findMatches(needle, blocks, 'data+timings'));
+    }
+    // A needle from somewhere else is not skipped, so an identical block matches.
+    const other = core.parseTape(sample('SpecTape demo.tzx')).blocks[1];
+    expect(coreCompare.findMatches(other, blocks, 'data')).toEqual(refCompare.findMatches(other, blocks, 'data'));
+  });
+
+  it('drops, adds, shifts, joins and flips bits the same way', () => {
+    const streams: coreBits.BitData[] = [
+      { data: new Uint8Array(0), usedBits: 8 },
+      { data: new Uint8Array([0b10110011]), usedBits: 8 },
+      { data: new Uint8Array([0b10110011]), usedBits: 3 },
+      { data: new Uint8Array([0xff, 0x00, 0xa5]), usedBits: 5 },
+      { data: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9]), usedBits: 1 },
+    ];
+    const ops = ['dropBits', 'addBits', 'shiftLeftBits', 'shiftRightBits'] as const;
+    for (const d of streams) {
+      expect(coreBits.totalBits(d)).toBe(refBits.totalBits(d));
+      expect(Array.from(coreBits.flipBytes(d.data))).toEqual(Array.from(refBits.flipBytes(d.data)));
+      for (const op of ops) {
+        for (const n of [0, 1, 3, 8, 17, 100]) {
+          const got = coreBits[op](d, n);
+          const want = refBits[op](d, n);
+          expect({ data: Array.from(got.data), usedBits: got.usedBits })
+            .toEqual({ data: Array.from(want.data), usedBits: want.usedBits });
+        }
+      }
+    }
+    for (const parts of [streams, streams.slice(1, 3), [streams[1]], streams.slice(0, 1)]) {
+      const got = coreBits.joinBits(parts);
+      const want = refBits.joinBits(parts);
+      expect({ data: Array.from(got.data), usedBits: got.usedBits })
+        .toEqual({ data: Array.from(want.data), usedBits: want.usedBits });
+    }
+  });
+
+  it('reads and writes POKEs blocks the same way', () => {
+    const infos: corePokes.PokesInfo[] = [
+      { description: '', trainers: [] },
+      { description: 'Cheats for the demo', trainers: [] },
+      {
+        description: 'Line one\nline two',
+        trainers: [
+          { description: 'Infinite lives', pokes: [{ page: null, addr: 32768, value: 255, original: 12 }] },
+          { description: 'Ask me', pokes: [{ page: 3, addr: 65535, value: null, original: null }] },
+          { description: 'Two\nline name', pokes: [] },
+        ],
+      },
+    ];
+    for (const info of infos) {
+      const bytes = refPokes.encodePokes(info);
+      expect(Array.from(corePokes.encodePokes(info))).toEqual(Array.from(bytes));
+      expect(corePokes.decodePokes(bytes)).toEqual(refPokes.decodePokes(bytes));
+      for (const hex of [false, true]) {
+        expect(corePokes.pokesToText(info, hex)).toBe(refPokes.pokesToText(info, hex));
+      }
+    }
+    // A truncated block fails the same way on both sides.
+    const truncated = new Uint8Array([3, 65, 66]);
+    expect(() => corePokes.decodePokes(truncated)).toThrow('Unexpected end of file at offset 1');
+    expect(() => refPokes.decodePokes(truncated)).toThrow('Unexpected end of file at offset 1');
+  });
+
+  it('parses POKEs text the same way, including the ways it can go wrong', () => {
+    const texts = [
+      '',
+      '; a note\n; another\n\n[Trainer]\nPOKE 32768,255',
+      'POKE 1:32768,255/12',
+      '32768,255',
+      'poke 3:$8000,?\nPOKE #65535,0x10',
+      '[Name | with pipes]\n; trainer note\nPOKE 1,2',
+      'POKE 1,2\nPOKE 3,4\n\n[Second]\nPOKE 5,6',
+      '  POKE   1 , 2 / 3  ',
+    ];
+    for (const text of texts) {
+      for (const hex of [false, true]) {
+        expect(corePokes.textToPokes(text, hex)).toEqual(refPokes.textToPokes(text, hex));
+        // And what comes out writes back to the same bytes.
+        const info = corePokes.textToPokes(text, hex);
+        expect(Array.from(corePokes.encodePokes(info))).toEqual(Array.from(refPokes.encodePokes(info)));
+      }
+    }
+    for (const bad of ['nonsense', 'POKE', 'POKE 1', 'POKE 1,', 'POKE ,2', 'POKE 1,2,3', 'POKE zz,2']) {
+      let coreError = '';
+      let refError = '';
+      try { corePokes.textToPokes(bad, false); } catch (e) { coreError = (e as Error).message; }
+      try { refPokes.textToPokes(bad, false); } catch (e) { refError = (e as Error).message; }
+      expect(coreError).toBe(refError);
+      expect(coreError).not.toBe('');
     }
   });
 });

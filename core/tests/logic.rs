@@ -7,7 +7,7 @@
 use spectape_core::consistency::{check_consistency, Severity};
 use spectape_core::content::{basic_score, block_body, detect_content, ContentKind, Source};
 use spectape_core::describe::{
-    block_length, checksum, decode_header, describe_block, encode_header, is_metadata, HeaderInfo,
+    block_length, checksum, describe_block, encode_header, is_metadata, HeaderInfo,
 };
 use spectape_core::programs::{detect_programs, group_ranges, tape_title, ProgramSource};
 use spectape_core::types::{ArchiveEntry, Block, Body, SelectEntry};

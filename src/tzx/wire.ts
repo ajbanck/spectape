@@ -3,7 +3,11 @@
 // literals below declare them, which is the order `parser.ts` used to build
 // them in, so key order (and therefore anything comparing JSON) is unchanged.
 import { Reader, Writer } from './bytes';
-import { ArchiveEntry, Block, ContentInfo, ContentKind, HardwareEntry, HeaderInfo, Issue, isUnknown, newUid, ParsedTape, PilotRun, Program, SelectEntry, SymDef } from './types';
+import {
+  ArchiveEntry, BitData, Block, CompareResult, ContentInfo, ContentKind, HardwareEntry, HeaderInfo,
+  Issue, isUnknown, newUid, ParsedTape, PilotRun, Poke, PokesInfo, Program, SelectEntry, SymDef,
+  Trainer,
+} from './types';
 
 export const WIRE_VERSION = 1;
 const UNKNOWN_TAG = 0xff;
@@ -445,4 +449,96 @@ function optU16(r: Reader): number | null {
 function headerInfo(r: Reader): HeaderInfo {
   const type = r.u8();
   return { type, typeName: str(r), name: str(r), length: r.u16(), param1: r.u16(), param2: r.u16() };
+}
+
+// ---- converting, comparing, bits and POKEs ---------------------------------
+
+/** Blocks handed back by the core, for the calls that answer with them. */
+export function decodeBlocks(buf: Uint8Array): Block[] {
+  const r = new Reader(buf);
+  readHeader(r);
+  const out: Block[] = [];
+  for (let n = r.u32(); n > 0; n--) out.push(block(r));
+  return out;
+}
+
+export function decodeU32s(buf: Uint8Array): number[] {
+  const r = new Reader(buf);
+  readHeader(r);
+  const out: number[] = [];
+  for (let n = r.u32(); n > 0; n--) out.push(r.u32());
+  return out;
+}
+
+export function decodeComparison(buf: Uint8Array): { left: CompareResult[]; right: CompareResult[]; identical: boolean } {
+  const r = new Reader(buf);
+  readHeader(r);
+  const names: CompareResult[] = ['same', 'diff', 'ignored'];
+  const side = () => {
+    const out: CompareResult[] = [];
+    for (let n = r.u32(); n > 0; n--) out.push(names[r.u8()]);
+    return out;
+  };
+  const left = side();
+  const right = side();
+  return { left, right, identical: r.u8() === 1 };
+}
+
+export function decodeBitData(buf: Uint8Array): BitData {
+  const r = new Reader(buf);
+  readHeader(r);
+  return { data: bytes(r), usedBits: r.u8() };
+}
+
+/** One or more bit streams on their way to the core. */
+export function encodeBitData(parts: BitData[]): Uint8Array {
+  const w = new Writer();
+  w.u32(parts.length);
+  for (const p of parts) {
+    putBytes(w, p.data);
+    w.u8(p.usedBits);
+  }
+  return w.toUint8Array();
+}
+
+export function decodePokesInfo(buf: Uint8Array): PokesInfo {
+  const r = new Reader(buf);
+  readHeader(r);
+  const description = str(r);
+  const trainers: Trainer[] = [];
+  for (let n = r.u32(); n > 0; n--) {
+    const desc = str(r);
+    const pokes: Poke[] = [];
+    for (let k = r.u32(); k > 0; k--) {
+      const opt = () => {
+        const present = r.u8() === 1;
+        const value = r.u32();
+        return present ? value : null;
+      };
+      pokes.push({ page: opt(), addr: r.u32(), value: opt(), original: opt() });
+    }
+    trainers.push({ description: desc, pokes });
+  }
+  return { description, trainers };
+}
+
+export function encodePokesInfo(info: PokesInfo): Uint8Array {
+  const w = new Writer();
+  putStr(w, info.description);
+  w.u32(info.trainers.length);
+  for (const t of info.trainers) {
+    putStr(w, t.description);
+    w.u32(t.pokes.length);
+    for (const p of t.pokes) {
+      const opt = (v: number | null) => {
+        w.u8(v === null ? 0 : 1);
+        w.u32(v ?? 0);
+      };
+      opt(p.page);
+      w.u32(p.addr);
+      opt(p.value);
+      opt(p.original);
+    }
+  }
+  return w.toUint8Array();
 }

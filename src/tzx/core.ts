@@ -7,11 +7,16 @@
 // synchronously, so `initCore` runs once at startup — see src/main.tsx — and
 // the parse functions are sync from then on.
 import { CORE_WASM_BASE64 } from './core.wasm';
-import { Block, ContentInfo, HeaderInfo, Issue, ParsedTape, Program } from './types';
+import { latin1ToBytes } from './bytes';
 import {
-  decodeBytes, decodeContent, decodeDescribed, decodeF64, decodeHeaderInfo, decodeIssues,
-  decodeOptString, decodePrograms, decodeRanges, decodeStrings, decodeTap, decodeTape, decodeU8,
-  decodeVersion, encodeBlocks, encodeHeaderInfo, WIRE_VERSION,
+  BitData, Block, BlockCompareMode, CompareResult, ContentInfo, HeaderInfo, Issue, ParsedTape,
+  PokesInfo, Program, TapeCompareMode,
+} from './types';
+import {
+  decodeBitData, decodeBlocks, decodeBytes, decodeComparison, decodeContent, decodeDescribed,
+  decodeF64, decodeHeaderInfo, decodeIssues, decodeOptString, decodePokesInfo, decodePrograms,
+  decodeRanges, decodeStrings, decodeTap, decodeTape, decodeU32s, decodeU8, decodeVersion,
+  encodeBitData, encodeBlocks, encodeHeaderInfo, encodePokesInfo, WIRE_VERSION,
 } from './wire';
 
 interface CoreExports {
@@ -38,7 +43,24 @@ interface CoreExports {
   core_encode_header(ptr: number, len: number): number;
   core_checksum(ptr: number, len: number): number;
   core_basic_score(ptr: number, len: number): number;
+  core_convert_block(ptr: number, len: number, id: number): number;
+  core_blocks_equal(ptr: number, len: number, mode: number): number;
+  core_compare_tapes(ptr: number, len: number, split: number, blockMode: number, tapeMode: number): number;
+  core_find_matches(ptr: number, len: number, skip: number, mode: number): number;
+  core_bits(ptr: number, len: number, op: number, n: number): number;
+  core_flip_bytes(ptr: number, len: number): number;
+  core_decode_pokes(ptr: number, len: number): number;
+  core_encode_pokes(ptr: number, len: number): number;
+  core_pokes_to_text(ptr: number, len: number, hex: number): number;
+  core_text_to_pokes(ptr: number, len: number, hex: number): number;
 }
+
+/** The compare modes as `core/src/wasm.rs` numbers them. */
+const BLOCK_MODES: BlockCompareMode[] = ['data', 'data+timings', 'data+timings+pauses'];
+const TAPE_MODES: TapeCompareMode[] = ['datablocks', 'ignore-metadata', 'all'];
+/** Bit operations, in the order `core_bits` expects. */
+export type BitOp = 'drop' | 'add' | 'shiftLeft' | 'shiftRight' | 'join';
+const BIT_OPS: BitOp[] = ['drop', 'add', 'shiftLeft', 'shiftRight', 'join'];
 
 /** Everything but the bookkeeping exports takes a buffer and returns one. */
 type Entry = Exclude<keyof CoreExports, 'memory' | 'core_wire_version' | 'core_alloc' | 'core_free'>;
@@ -204,4 +226,53 @@ export function checksumCore(data: Uint8Array): number {
 
 export function basicScoreCore(data: Uint8Array): number {
   return decodeF64(call('core_basic_score', data));
+}
+
+/** Change a block's type, keeping its uid and the fields the new type shares. */
+export function convertBlockCore(b: Block, id: number): Block {
+  const [converted] = decodeBlocks(call('core_convert_block', encodeBlocks([b]), id));
+  return { ...converted, uid: b.uid };
+}
+
+export function blocksEqualCore(a: Block, b: Block, mode: BlockCompareMode): boolean {
+  return decodeU8(call('core_blocks_equal', encodeBlocks([a, b]), BLOCK_MODES.indexOf(mode))) === 1;
+}
+
+export function compareTapesCore(
+  left: Block[], right: Block[], blockMode: BlockCompareMode, tapeMode: TapeCompareMode,
+): { left: CompareResult[]; right: CompareResult[]; identical: boolean } {
+  const payload = encodeBlocks([...left, ...right]);
+  return decodeComparison(
+    call('core_compare_tapes', payload, left.length, BLOCK_MODES.indexOf(blockMode), TAPE_MODES.indexOf(tapeMode)),
+  );
+}
+
+/** `skip` is where the needle sits in the haystack, or -1 when it is not in it. */
+export function findMatchesCore(needle: Block, haystack: Block[], mode: BlockCompareMode, skip: number): number[] {
+  const payload = encodeBlocks([needle, ...haystack]);
+  return decodeU32s(call('core_find_matches', payload, skip < 0 ? 0xffffffff : skip, BLOCK_MODES.indexOf(mode)));
+}
+
+export function bitsCore(op: BitOp, parts: BitData[], n = 0): BitData {
+  return decodeBitData(call('core_bits', encodeBitData(parts), BIT_OPS.indexOf(op), n));
+}
+
+export function flipBytesCore(data: Uint8Array): Uint8Array {
+  return decodeBytes(call('core_flip_bytes', data));
+}
+
+export function decodePokesCore(data: Uint8Array): PokesInfo {
+  return decodePokesInfo(call('core_decode_pokes', data));
+}
+
+export function encodePokesCore(info: PokesInfo): Uint8Array {
+  return decodeBytes(call('core_encode_pokes', encodePokesInfo(info)));
+}
+
+export function pokesToTextCore(info: PokesInfo, hex: boolean): string {
+  return decodeOptString(call('core_pokes_to_text', encodePokesInfo(info), hex ? 1 : 0)) ?? '';
+}
+
+export function textToPokesCore(text: string, hex: boolean): PokesInfo {
+  return decodePokesInfo(call('core_text_to_pokes', latin1ToBytes(text), hex ? 1 : 0));
 }

@@ -226,6 +226,69 @@ impl Body {
     }
 }
 
+/// Block types the user can create from the UI, in menu order.
+pub const CREATABLE_IDS: [u8; 25] = [
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x18, 0x19, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
+    0x2a, 0x2b, 0x30, 0x31, 0x32, 0x33, 0x35, 0x5a,
+];
+
+/// A fresh block of the given id with sensible defaults, the port of
+/// `createBlock`. An id the editor does not model becomes an empty unknown
+/// block, as it does there.
+pub fn create_body(id: u8) -> Body {
+    match id {
+        0x10 => Body::Standard { pause: 1000, data: Vec::new() },
+        0x11 => Body::Turbo {
+            pilot: RomTimings::PILOT,
+            sync1: RomTimings::SYNC1,
+            sync2: RomTimings::SYNC2,
+            zero: RomTimings::ZERO,
+            one: RomTimings::ONE,
+            pilot_len: RomTimings::PILOT_DATA,
+            used_bits: 8,
+            pause: 1000,
+            data: Vec::new(),
+        },
+        0x12 => Body::PureTone { pulse_len: 2168, count: 8063 },
+        0x13 => Body::PulseSeq { pulses: vec![667, 735] },
+        0x14 => Body::PureData { zero: 855, one: 1710, used_bits: 8, pause: 1000, data: Vec::new() },
+        0x15 => Body::Direct { tstates: 79, pause: 0, used_bits: 8, data: Vec::new() },
+        0x18 => Body::Csw { pause: 0, sample_rate: 44100, compression: 1, pulse_count: 0, data: Vec::new() },
+        0x19 => Body::Generalized {
+            pause: 1000,
+            totp: 0,
+            npp: 2,
+            pilot_symbols: Vec::new(),
+            pilot_stream: Vec::new(),
+            totd: 0,
+            npd: 2,
+            data_symbols: vec![
+                SymDef { flags: 0, pulses: vec![855, 855] },
+                SymDef { flags: 0, pulses: vec![1710, 1710] },
+            ],
+            data: Vec::new(),
+        },
+        0x20 => Body::Pause { pause: 1000 },
+        0x21 => Body::GroupStart { name: "Group".to_string() },
+        0x22 => Body::GroupEnd,
+        0x23 => Body::Jump { offset: 1 },
+        0x24 => Body::LoopStart { count: 2 },
+        0x25 => Body::LoopEnd,
+        0x26 => Body::Call { offsets: vec![1] },
+        0x27 => Body::Return,
+        0x28 => Body::Select { entries: vec![SelectEntry { offset: 1, text: "Selection".to_string() }] },
+        0x2a => Body::Stop48,
+        0x2b => Body::SignalLevel { level: 0 },
+        0x30 => Body::Text { text: String::new() },
+        0x31 => Body::Message { time: 5, text: String::new() },
+        0x32 => Body::Archive { entries: vec![ArchiveEntry { kind: 0, text: String::new() }] },
+        0x33 => Body::Hardware { entries: vec![HardwareEntry { kind: 0, id: 1, info: 0 }] },
+        0x35 => Body::Custom { ident: "Custom          ".to_string(), data: Vec::new() },
+        0x5a => Body::Glue { raw: vec![0x58, 0x54, 0x61, 0x70, 0x65, 0x21, 0x1a, 1, 20] },
+        _ => Body::Unknown { id, raw: Vec::new() },
+    }
+}
+
 /// The spec's name for a block ID, as `BLOCK_NAMES` in `types.ts` lists them.
 /// Only the ones the descriptions need; the UI keeps the full table until it
 /// moves to Rust in stage 4.
