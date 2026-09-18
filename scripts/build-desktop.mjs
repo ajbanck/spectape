@@ -331,8 +331,15 @@ if (made.length) {
   for (const f of made) console.log(`  ${f} (${mb(f)} MB)`);
 }
 
+// The screenshot first, because looking at a layout change is the common reason to
+// want something other than the app itself; the measuring flags are here for when a
+// number in docs/rust-migration.md needs checking again, which is rare now that they
+// are all in. Only --exit-on-draw and --bench open a window.
 console.log(`
-The measuring commands, for when a number needs checking again (they draw a window):
-  cold start   time "${bin}" --exit-on-draw
-  cursor move  "${bin}" --rows 3000 --bench 200
-  binary size  ${mb(bin)} MB (above)`);
+Look at it without opening a window (scratch/ is gitignored):
+  "${bin}" --screenshot scratch/desktop.png,1400x900 "public/samples/SpecTape demo.tzx"
+
+Measuring, when a number needs checking again — the plan's are in docs/rust-migration.md:
+  --measure                 the core in process and the app's own first frame, no window
+  --exit-on-draw            quits on the first frame, so \`time\` on it is the cold start
+  --rows 3000 --bench 200   a cursor move per frame on a 3,000-row list, distribution reported`);
