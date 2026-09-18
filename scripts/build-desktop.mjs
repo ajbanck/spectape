@@ -1,5 +1,5 @@
 // Builds SpecTape, the desktop app (desktop/), and packages it for the platform it
-// is run on. Stage 5 of docs/rust-migration.md: this replaced `tauri build`, so it
+// is run on. Stage 5 of the Rust migration: this replaced `tauri build`, so it
 // is what CI calls too — one script, so a release is the same steps a person runs.
 //
 //   node scripts/build-desktop.mjs [--debug] [--package] [--universal] [--no-build]
@@ -342,7 +342,7 @@ if (made.length) {
 
 // One line, and the binary's own --help carries the flags. Everything that used to
 // be printed here was scaffolding for a question that has since been answered: the
-// measuring flags for numbers that are now in docs/rust-migration.md, and a symlink
+// measuring flags for numbers that are now in CLAUDE.md, and a symlink
 // into /Applications for an "open with" path confirmed on 2026-09-18.
 console.log(`
 Screenshots, measuring and the rest:

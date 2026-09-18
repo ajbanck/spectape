@@ -3,8 +3,8 @@
 //! A window, the platform's menu built from one command table, two tape panes
 //! with their editors, the data window, the dialogs and playback — all on
 //! `spectape-core` linked directly: no wasm, no wire format, no web view. Stage 3
-//! of docs/rust-migration.md chose the toolkit and measured the boundary, stage 4
-//! filled the app in against the parity checklist there, and stage 5 made it the
+//! of the Rust migration chose the toolkit and measured the boundary, stage 4
+//! filled the app in against a parity checklist, and stage 5 made it the
 //! desktop app: the Tauri shell is gone, `src/` is the browser build.
 //!
 //! The flags are in `HELP` below, which is what `--help` prints — one list, so it

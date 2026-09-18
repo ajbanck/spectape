@@ -9,7 +9,7 @@
 //! It also unpins the font set: nothing outside the macOS shortcut labels needs
 //! a glyph above the Latin block any more. That turned out to be worth about a
 //! millisecond rather than the tens the cold-start question was after — the
-//! measurement is in `--measure` and the finding is in docs/rust-migration.md —
+//! measurement is in `--measure` —
 //! so the reason to have done this is the icons themselves: one shape per
 //! meaning, the same on every platform, at any size.
 

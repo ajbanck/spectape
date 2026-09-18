@@ -6,8 +6,7 @@
 //! turns into `application:openURLs:` on the application delegate — at launch,
 //! and again every time afterwards. winit registers that delegate itself
 //! (`WinitApplicationDelegate`) and implements only the two lifecycle methods it
-//! needs, so the message goes nowhere and the double-click does nothing. That is
-//! the dead path stage 4 left and stage 5 owes (docs/rust-migration.md).
+//! needs, so the message goes nowhere and the double-click does nothing.
 //!
 //! So this module adds the method to whatever class winit registered, from an
 //! observer of `NSApplicationWillFinishLaunchingNotification` — the last moment

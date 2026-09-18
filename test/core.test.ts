@@ -1,4 +1,4 @@
-// Differential test for stage 1 of docs/rust-migration.md: the wasm core and the
+// Differential test from stage 1 of the Rust migration: the wasm core and the
 // TypeScript parser it replaced must return the same thing for the same bytes.
 // test/reference/parser.ts is that former implementation, frozen.
 import { describe, it, expect } from 'vitest';
