@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseTzx, parseTap, isTzx } from '../src/tzx/parser';
 import { serializeTzx, serializeTap, requiredVersion, saveVersion } from '../src/tzx/writer';
-import { createBlock, Block, CREATABLE_IDS } from '../src/tzx/types';
+import { createBlock, Block, CREATABLE_IDS, isUnknown } from '../src/tzx/types';
 import { decodeHeader, encodeHeader, describeBlock } from '../src/tzx/describe';
 import { checkConsistency } from '../src/tzx/consistency';
 import { tapeDuration, playbackOrder, renderTape, renderLength, encodeWav, emitBlock, SampleSink, TSTATES_PER_SEC, PulseSink, playbackTimeline, positionAt, blockDuration, LEAD_TSTATES } from '../src/tzx/audio';
@@ -51,6 +51,22 @@ describe('TZX round trip', () => {
     expect(parsed.blocks.length).toBe(2);
     expect(parsed.blocks[0].id).toBe(0x5b);
     expect(parsed.blocks[1].id).toBe(0x20);
+    expect(Array.from(serializeTzx(parsed.blocks, { major: 1, minor: 20 }))).toEqual(Array.from(file));
+  });
+
+  it('reports a CSW block whose length cannot hold its own header', () => {
+    // len 4 is below the 10-byte CSW header; reading len - 10 bytes used to move
+    // the read position backwards.
+    const raw = new Uint8Array([0x18, 4, 0, 0, 0, 1, 2, 3, 4]);
+    const file = new Uint8Array([...Array.from('ZXTape!\x1a').map((c) => c.charCodeAt(0)), 1, 20, ...raw]);
+    const parsed = parseTzx(file);
+    expect(parsed.warnings).toEqual([
+      'Block 1 (ID 18) at offset 10: CSW block length 4 is shorter than its 10-byte header',
+    ]);
+    expect(parsed.blocks.length).toBe(1);
+    expect(parsed.blocks[0].id).toBe(0x18);
+    expect(isUnknown(parsed.blocks[0])).toBe(true);
+    // The corrupt bytes are kept, so the file still round-trips.
     expect(Array.from(serializeTzx(parsed.blocks, { major: 1, minor: 20 }))).toEqual(Array.from(file));
   });
 

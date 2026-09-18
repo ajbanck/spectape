@@ -106,6 +106,9 @@ export function parseBlock(id: number, r: Reader): Block {
     }
     case 0x18: {
       const len = r.u32();
+      // A length under the 10-byte header is corrupt; reading len - 10 bytes would
+      // move the read position backwards. Report it and keep the rest verbatim.
+      if (len < 10) throw new Error(`CSW block length ${len} is shorter than its 10-byte header`);
       const pause = r.u16();
       const sampleRate = r.u24();
       const compression = r.u8();
