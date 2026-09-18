@@ -278,6 +278,39 @@ Not shipped. Developed alongside the real app.
 **Gate — this is the decision point.** Does the Slint list handle 3,000 rows smoothly? Does the
 menu feel right on all three platforms? If not, swap to egui or Qt here, having lost an afternoon. Measure cold start now: it should be near 100 ms, or the premise is wrong.
 
+### Starting stage 3
+
+**What the core already gives you.** `spectape-core` is an rlib as well as a cdylib, so the native
+binary links it directly: no wasm, no wire format, no `core.ts`. Call the Rust functions the app's
+TypeScript reaches through `src/tzx/core.ts` — `parser::parse_tape`, `describe::describe_block`
+and `block_length`, `content::content_labels`, `programs::group_ranges` and `detect_programs`,
+`consistency::check_consistency`, `audio::{playback_order, render_tape}`, and the rest. Stage 2
+left nothing in TypeScript that the native app will need, with two exceptions worth knowing about
+before the block list is built: inflating Z-RLE CSW blocks needs a zlib crate on this side (the
+core has no dependencies on purpose, and the web app does it with pako), and the hex dump's
+per-byte character table is `spectrum::charset::char_table`.
+
+**Keep the dependency line where it is.** Slint goes in a *new* binary crate that depends on
+`core`, not in `core` itself. The whole reason the core is dependency-free is that it compiles to
+a 249 kB wasm module for the web build; a UI toolkit in there would end that. A workspace with
+`core/` and `native/` is the natural shape.
+
+**Build the list against a real tape.** `public/samples/SpecTape demo.tzx` has 19 blocks covering
+every type; for the 3,000-row question, repeat a sample tape's blocks until the list is long
+enough, which is what the stage 2 benchmarks did. Rendering 3,000 rows means calling
+`describe_block` and `content_labels` for all of them — in-process now, so the numbers should be
+the ones in "What the boundary costs" *minus* the encoding, which was most of them.
+
+**Three numbers to bring back.** Cold start to a drawn window (the baseline is 355 ms, of which
+~150 ms is WKWebView creation); a cursor move on a 3,000-block list (the baseline is 76–90 ms);
+and the binary's size (the plan assumes 15–25 MB against today's 3.6 MB app plus a system
+webview). None can be measured from a terminal session: the app has to be run and watched, so
+this stage is a build-and-report loop with the person at the keyboard.
+
+**What "the menu feels right" means here.** `src/state/commands.ts` is the complete command table
+— ids, labels, shortcuts, enabled rules — and `src-tauri/src/menu.rs` already builds a native menu
+from the same ids. Stage 3 only needs enough of it to judge the feel: the real port is stage 4.
+
 ## Stage 4 — Feature parity, area by area (2–4 days of writing, plus your testing)
 
 Port `src/state` into Rust as you go; each area is done when it matches the current app:
