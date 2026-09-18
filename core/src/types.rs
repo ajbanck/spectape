@@ -226,6 +226,44 @@ impl Body {
     }
 }
 
+/// The spec's name for a block ID, as `BLOCK_NAMES` in `types.ts` lists them.
+/// Only the ones the descriptions need; the UI keeps the full table until it
+/// moves to Rust in stage 4.
+pub fn block_name(id: u8) -> Option<&'static str> {
+    Some(match id {
+        0x10 => "Standard speed data",
+        0x11 => "Turbo speed data",
+        0x12 => "Pure tone",
+        0x13 => "Pulse sequence",
+        0x14 => "Pure data",
+        0x15 => "Direct recording",
+        0x16 => "C64 ROM type data (deprecated)",
+        0x17 => "C64 turbo data (deprecated)",
+        0x18 => "CSW recording",
+        0x19 => "Generalized data",
+        0x20 => "Pause / Stop the tape",
+        0x21 => "Group start",
+        0x22 => "Group end",
+        0x23 => "Jump to block",
+        0x24 => "Loop start",
+        0x25 => "Loop end",
+        0x26 => "Call sequence",
+        0x27 => "Return from sequence",
+        0x28 => "Select block",
+        0x2a => "Stop the tape if in 48K mode",
+        0x2b => "Set signal level",
+        0x30 => "Text description",
+        0x31 => "Message",
+        0x32 => "Archive info",
+        0x33 => "Hardware type",
+        0x34 => "Emulation info (deprecated)",
+        0x35 => "Custom info",
+        0x40 => "Snapshot (deprecated)",
+        0x5a => "Glue",
+        _ => return None,
+    })
+}
+
 /// A block as the app holds it: a body plus the uid the UI keys on.
 #[derive(Clone, Debug)]
 pub struct Block {

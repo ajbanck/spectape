@@ -194,6 +194,55 @@ export type Block =
 
 export type DataBlock = StandardBlock | TurboBlock | PureDataBlock | GeneralizedBlock | DirectBlock;
 
+/** A standard ROM header, as `describe.ts` decodes one. */
+export interface HeaderInfo {
+  type: number; // 0 program, 1 number array, 2 char array, 3 bytes
+  typeName: string;
+  name: string;
+  length: number;
+  param1: number;
+  param2: number;
+}
+
+export type ContentKind = 'header' | 'basic' | 'screen' | 'code' | 'array' | 'data' | 'empty';
+
+/** What a data block holds, as `content.ts` detects it. */
+export interface ContentInfo {
+  kind: ContentKind;
+  /** Short label for the block list, e.g. "BASIC", "SCREEN", "CODE 32768". */
+  label: string;
+  /** Load address of the body in Spectrum memory (best guess). */
+  base: number;
+  /** Bytes to skip at the start (flag byte) and drop at the end (checksum). */
+  skipFlag: boolean;
+  skipChecksum: boolean;
+  /** Program length from the header, when known (BASIC: where VARS start). */
+  progLen: number | null;
+  /** Decoded header when kind is 'header'. */
+  header: HeaderInfo | null;
+  /** Whether the detection came from a preceding header or from the bytes themselves. */
+  source: 'header' | 'heuristic' | 'none';
+  /** Body length announced by the preceding header, when that header was used. */
+  expectedLength: number | null;
+}
+
+/** A complaint from `consistency.ts`. */
+export interface Issue {
+  block: number; // 0-based index, -1 for tape-wide
+  severity: 'error' | 'warning' | 'info';
+  message: string;
+}
+
+/** A program (a game) on a collection tape, as `programs.ts` finds them. */
+export interface Program {
+  name: string;
+  start: number; // first block index
+  end: number; // last block index, inclusive
+  /** What decided the boundary: a BASIC Program header, a group holding one, a Select block
+   *  entry, or nothing (the whole tape as one program). */
+  source: 'header' | 'group' | 'select' | 'tape';
+}
+
 /** What a parse returns: the blocks, the file's TZX version and any complaints. */
 export interface ParsedTape {
   blocks: Block[];

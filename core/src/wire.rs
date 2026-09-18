@@ -388,3 +388,155 @@ fn string(w: &mut Vec<u8>, s: &str) {
     let b = crate::bytes::string_to_latin1(s);
     bytes(w, &b);
 }
+
+// ---- answers for the description, content, consistency and program calls ----
+
+/// `[u32 count]` then that many strings.
+pub fn encode_strings(items: &[String]) -> Vec<u8> {
+    let mut w = header();
+    u32v(&mut w, items.len());
+    for s in items {
+        string(&mut w, s);
+    }
+    w
+}
+
+/// An optional string: `[u8 present]` and, when present, the string.
+pub fn encode_opt_string(value: Option<&str>) -> Vec<u8> {
+    let mut w = header();
+    match value {
+        Some(s) => {
+            w.push(1);
+            string(&mut w, s);
+        }
+        None => w.push(0),
+    }
+    w
+}
+
+/// A block's list description and its length column.
+pub fn encode_described(description: &str, length: u32) -> Vec<u8> {
+    let mut w = header();
+    string(&mut w, description);
+    u32v(&mut w, length as usize);
+    w
+}
+
+/// A single byte answer, such as a checksum.
+pub fn encode_u8(v: u8) -> Vec<u8> {
+    vec![WIRE_VERSION, 0, v]
+}
+
+/// A double, such as the BASIC score.
+pub fn encode_f64(v: f64) -> Vec<u8> {
+    let mut w = header();
+    w.extend_from_slice(&v.to_le_bytes());
+    w
+}
+
+/// `[u32 count]` then `[u32 start][u32 end]` per range.
+pub fn encode_ranges(ranges: &[(u32, u32)]) -> Vec<u8> {
+    let mut w = header();
+    u32v(&mut w, ranges.len());
+    for (start, end) in ranges {
+        u32v(&mut w, *start as usize);
+        u32v(&mut w, *end as usize);
+    }
+    w
+}
+
+pub fn encode_content(c: &crate::content::ContentInfo) -> Vec<u8> {
+    let mut w = header();
+    string(&mut w, c.kind.name());
+    string(&mut w, &c.label);
+    u16v(&mut w, c.base);
+    w.push(c.skip_flag as u8);
+    w.push(c.skip_checksum as u8);
+    opt_u16(&mut w, c.prog_len);
+    match &c.header {
+        Some(h) => {
+            w.push(1);
+            put_header(&mut w, h);
+        }
+        None => w.push(0),
+    }
+    string(&mut w, c.source.name());
+    opt_u16(&mut w, c.expected_length);
+    w
+}
+
+/// An optional ROM header, as `decodeHeader` returns one.
+pub fn encode_header_info(h: Option<&crate::describe::HeaderInfo>) -> Vec<u8> {
+    let mut w = header();
+    match h {
+        Some(h) => {
+            w.push(1);
+            put_header(&mut w, h);
+        }
+        None => w.push(0),
+    }
+    w
+}
+
+/// `[u32 count]` then `[i32 block][str severity][str message]` per issue.
+pub fn encode_issues(issues: &[crate::consistency::Issue]) -> Vec<u8> {
+    let mut w = header();
+    u32v(&mut w, issues.len());
+    for i in issues {
+        w.extend_from_slice(&i.block.to_le_bytes());
+        string(&mut w, i.severity.name());
+        string(&mut w, &i.message);
+    }
+    w
+}
+
+/// `[u32 count]` then `[str name][u32 start][u32 end][str source]` per program.
+pub fn encode_programs(programs: &[crate::programs::Program]) -> Vec<u8> {
+    let mut w = header();
+    u32v(&mut w, programs.len());
+    for p in programs {
+        string(&mut w, &p.name);
+        u32v(&mut w, p.start as usize);
+        u32v(&mut w, p.end as usize);
+        string(&mut w, p.source.name());
+    }
+    w
+}
+
+/// A ROM header arriving from JavaScript, for `encode_header`.
+pub fn decode_header_info(buf: &[u8]) -> ReadResult<crate::describe::HeaderInfo> {
+    let mut r = Reader::new(buf);
+    let kind = r.u8()?;
+    let name = read_str(&mut r)?;
+    Ok(crate::describe::HeaderInfo {
+        kind,
+        type_name: crate::describe::HEADER_TYPE_NAMES.get(kind as usize).unwrap_or(&"").to_string(),
+        name,
+        length: r.u16()?,
+        param1: r.u16()?,
+        param2: r.u16()?,
+    })
+}
+
+fn header() -> Vec<u8> {
+    vec![WIRE_VERSION, 0]
+}
+
+fn put_header(w: &mut Vec<u8>, h: &crate::describe::HeaderInfo) {
+    w.push(h.kind);
+    string(w, &h.type_name);
+    string(w, &h.name);
+    u16v(w, h.length);
+    u16v(w, h.param1);
+    u16v(w, h.param2);
+}
+
+fn opt_u16(w: &mut Vec<u8>, v: Option<u16>) {
+    match v {
+        Some(n) => {
+            w.push(1);
+            u16v(w, n);
+        }
+        None => w.push(0),
+    }
+}

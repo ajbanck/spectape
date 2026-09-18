@@ -152,7 +152,13 @@ implementations before the TypeScript goes away:
    which is what every later module needs to receive a tape. Round trips, the version rules, the
    TAP export and the cases the writer papers over (over-long text, short idents, odd glue,
    symbol pulses shorter than `npp`) are checked in both suites: 66 TypeScript tests, 19 Rust.
-2. `describe.ts`, `content.ts`, `consistency.ts`, `programs.ts` — pure, well covered
+2. ~~`describe.ts`, `content.ts`, `consistency.ts`, `programs.ts`~~ — **done** 2026-09-18.
+   `core/src/{describe,content,consistency,programs}.rs` hold the list descriptions and ROM
+   headers, the content detection, the consistency checks and the program/group structure; the
+   four TypeScript modules are signatures over them, with the old implementations frozen under
+   `test/reference/`. 75 TypeScript tests and 27 Rust ones, the differential ones comparing every
+   block of every sample tape, the awkward content cases, twenty consistency tapes and ten
+   program layouts
 3. `compare.ts`, `convert.ts`, `pokes.ts`, `bits.ts`
 4. `spectrum/basic.ts`, `screen.ts`, `disasm.ts`, `charset.ts`
 5. `audio.ts` last — the preallocated-buffer behaviour and `playbackTimeline` are subtle, and the
@@ -161,22 +167,47 @@ implementations before the TypeScript goes away:
 **Ships after each module.** At the end, all 3,130 lines of logic are Rust, proven in production
 through the existing app, and the browser version still works.
 
+**What stays in TypeScript until stage 4:** predicates and slices over the block model that the
+UI asks for per row and that carry no logic — `isMetadata`, `blockBody`, `payload`, and the
+`isDataBlock`/`hasData` pair that was always in `types.ts`. Crossing into wasm to drop two bytes
+costs more than it saves. The core has its own copy of each, and both sides assert the same table
+(`core/tests/logic.rs` and `test/core.test.ts`), so the copies cannot drift apart.
+
+**Bundle so far:** 187.56 kB before stage 1, 253.20 kB after the parser, 335.10 kB after the
+writer and module 2 (122.76 kB gzipped). The wasm itself is 119 KB. Most of the growth is Rust's
+formatting machinery rather than our code — the padded-hex helper costs 106 bytes of it — and
+`wasm-opt`, which usually trims 10–20%, is not installed here. Still inside the 200–400 kB the
+plan budgeted, with three modules to go; worth re-measuring at the end of the stage.
+
 **What the boundary costs, measured on a 3,000-block, 1.2 MB tape** (the size the plan measures
 rendering with): the app encodes the blocks onto the wire for every call, so calls that the UI
 makes per row are the ones to watch.
 
-| | TypeScript | Rust core |
-|---|---|---|
-| `serializeTzx` of the whole tape | 4.7 ms | 7.4 ms |
-| `requiredVersion` (pane header, per render) | 0.1 ms | 1.6 ms |
-| `serializeBlock` × 3000 (one per row) | 5.8 ms | 12.3 ms |
+| | TypeScript | Rust core, cold | Rust core, asked again |
+|---|---|---|---|
+| `serializeTzx` of the whole tape | 4.7 ms | 7.4 ms | — |
+| `requiredVersion` (pane header) | 0.1 ms | 1.6 ms | — |
+| `describeBlock` + `blockLength` × 3000 | 1.9 ms | 14.7 ms | 0.3 ms |
+| content labels for the list | 0.8 ms | 7.4 ms | 0.0 ms |
+| `checkConsistency` | 1.9 ms | 9.5 ms | 0.0 ms |
+| `detectPrograms` | 0.6 ms | 8.3 ms | 0.0 ms |
+| `groupRanges` | 0.1 ms | 1.5 ms | 0.0 ms |
 
-`requiredVersion` and `saveVersion` get a payload with the byte data left out — they provably
-only look at block types and entries, and the differential tests would catch a core that started
-reading data — which brought them from 8.5 ms to 1.6 ms. The per-row `serializeBlock` cost is
-`describe.ts` asking for a block's length; it disappears with module 2, which moves the whole
-list description into one call. The general answer is stage 4, where the tape stops crossing the
-boundary at all because it lives in Rust; until then, prefer one call per list over one per row.
+Three things keep that honest:
+
+- **Ask once per list, not once per row.** `contentLabels(blocks)` replaced 3,000 calls to
+  `detectContent` in `TapePane.tsx`.
+- **Cache on identity.** Blocks and the arrays holding them are immutable, so `src/tzx/cache.ts`
+  memoizes per-tape answers on a `WeakMap` keyed by the array, and descriptions on the block
+  object. Re-renders — the measured 76–90 ms cursor move — now cost nothing at all where the
+  TypeScript recomputed every time. Only the first look at a changed tape pays.
+- **Leave out what the call does not read.** `requiredVersion` and `saveVersion` get a payload
+  with the byte data stripped, which took them from 8.5 ms to 1.6 ms. The differential tests give
+  the reference the real data, so a core that started reading what it is not sent would fail.
+
+The remaining cost is the first call after a tape changes: on a 3,000-block, 1.2 MB tape that is
+about 40 ms of encoding spread over the list, the checks and the program list. The real answer is
+stage 4, where the tape stops crossing the boundary because it lives in Rust.
 
 ## Stage 3 — Native shell skeleton (half a day)
 

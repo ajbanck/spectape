@@ -7,8 +7,12 @@
 // synchronously, so `initCore` runs once at startup — see src/main.tsx — and
 // the parse functions are sync from then on.
 import { CORE_WASM_BASE64 } from './core.wasm';
-import { Block, ParsedTape } from './types';
-import { decodeBytes, decodeTap, decodeTape, decodeVersion, encodeBlocks, WIRE_VERSION } from './wire';
+import { Block, ContentInfo, HeaderInfo, Issue, ParsedTape, Program } from './types';
+import {
+  decodeBytes, decodeContent, decodeDescribed, decodeF64, decodeHeaderInfo, decodeIssues,
+  decodeOptString, decodePrograms, decodeRanges, decodeStrings, decodeTap, decodeTape, decodeU8,
+  decodeVersion, encodeBlocks, encodeHeaderInfo, WIRE_VERSION,
+} from './wire';
 
 interface CoreExports {
   memory: WebAssembly.Memory;
@@ -23,6 +27,17 @@ interface CoreExports {
   core_serialize_blocks(ptr: number, len: number): number;
   core_required_version(ptr: number, len: number): number;
   core_save_version(ptr: number, len: number, major: number, minor: number): number;
+  core_describe_block(ptr: number, len: number, hex: number): number;
+  core_content_labels(ptr: number, len: number): number;
+  core_detect_content(ptr: number, len: number, index: number): number;
+  core_check_consistency(ptr: number, len: number, base: number): number;
+  core_detect_programs(ptr: number, len: number): number;
+  core_group_ranges(ptr: number, len: number): number;
+  core_tape_title(ptr: number, len: number): number;
+  core_decode_header(ptr: number, len: number): number;
+  core_encode_header(ptr: number, len: number): number;
+  core_checksum(ptr: number, len: number): number;
+  core_basic_score(ptr: number, len: number): number;
 }
 
 /** Everything but the bookkeeping exports takes a buffer and returns one. */
@@ -134,4 +149,59 @@ export function saveVersionCore(
   const l = loaded ?? { major: NO_VERSION, minor: NO_VERSION };
   const payload = encodeBlocks(blocks, { withData: false });
   return decodeVersion(call('core_save_version', payload, l.major, l.minor));
+}
+
+/** Description and length column for one block, as the list shows them. */
+export function describeBlockCore(block: Block, hex: boolean): { description: string; length: number } {
+  return decodeDescribed(call('core_describe_block', encodeBlocks([block]), hex ? 1 : 0));
+}
+
+/** Content labels for a whole tape, one call rather than one per row. */
+export function contentLabelsCore(blocks: Block[]): string[] {
+  return decodeStrings(call('core_content_labels', encodeBlocks(blocks)));
+}
+
+/**
+ * What a block contains. Only the block and the one before it matter, so that
+ * is all that goes over the wire.
+ */
+export function detectContentCore(blocks: Block[], index: number): ContentInfo {
+  const block = blocks[index];
+  // Out of range: the core answers with the "nothing detected" default.
+  if (!block) return decodeContent(call('core_detect_content', encodeBlocks([]), 0));
+  const prev = index > 0 ? blocks[index - 1] : null;
+  const window = prev ? [prev, block] : [block];
+  return decodeContent(call('core_detect_content', encodeBlocks(window), prev ? 1 : 0));
+}
+
+export function checkConsistencyCore(blocks: Block[], base: number): Issue[] {
+  return decodeIssues(call('core_check_consistency', encodeBlocks(blocks), base));
+}
+
+export function detectProgramsCore(blocks: Block[]): Program[] {
+  return decodePrograms(call('core_detect_programs', encodeBlocks(blocks)));
+}
+
+export function groupRangesCore(blocks: Block[]): Map<number, number> {
+  return decodeRanges(call('core_group_ranges', encodeBlocks(blocks, { withData: false })));
+}
+
+export function tapeTitleCore(blocks: Block[]): string | null {
+  return decodeOptString(call('core_tape_title', encodeBlocks(blocks, { withData: false })));
+}
+
+export function decodeHeaderCore(data: Uint8Array): HeaderInfo | null {
+  return decodeHeaderInfo(call('core_decode_header', data));
+}
+
+export function encodeHeaderCore(h: HeaderInfo): Uint8Array {
+  return decodeBytes(call('core_encode_header', encodeHeaderInfo(h)));
+}
+
+export function checksumCore(data: Uint8Array): number {
+  return decodeU8(call('core_checksum', data));
+}
+
+export function basicScoreCore(data: Uint8Array): number {
+  return decodeF64(call('core_basic_score', data));
 }

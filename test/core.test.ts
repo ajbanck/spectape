@@ -8,8 +8,16 @@ import * as core from '../src/tzx/parser';
 import * as ref from './reference/parser';
 import * as coreWriter from '../src/tzx/writer';
 import * as refWriter from './reference/writer';
+import * as coreDescribe from '../src/tzx/describe';
+import * as refDescribe from './reference/describe';
+import * as coreContent from '../src/tzx/content';
+import * as refContent from './reference/content';
+import { checkConsistency as coreCheck } from '../src/tzx/consistency';
+import { checkConsistency as refCheck } from './reference/consistency';
+import * as corePrograms from '../src/tzx/programs';
+import * as refPrograms from './reference/programs';
 import { serializeTzx, serializeTap } from '../src/tzx/writer';
-import { Block, CREATABLE_IDS, ParsedTape, createBlock } from '../src/tzx/types';
+import { Block, CREATABLE_IDS, ParsedTape, createBlock, isDataBlock } from '../src/tzx/types';
 import { encodeHeader } from '../src/tzx/describe';
 
 /** Blocks compare by content; uids are handed out per parse and always differ. */
@@ -212,6 +220,201 @@ describe('the Rust writer against the TypeScript writer it replaced', () => {
         ? coreWriter.serializeTap(tape.blocks).bytes
         : coreWriter.serializeTzx(tape.blocks, { major: tape.major, minor: tape.minor });
       expect(Array.from(out)).toEqual(Array.from(bytes));
+    }
+  });
+});
+
+describe('the Rust descriptions, detection and structure against the TypeScript they replaced', () => {
+  const sig = Array.from('ZXTape!\x1a').map((c) => c.charCodeAt(0));
+  const tzx = (...body: number[]) => new Uint8Array([...sig, 1, 20, ...body]);
+
+  /** Every creatable block plus a few with realistic content. */
+  function blocksForDescription(): Block[] {
+    const blocks: Block[] = CREATABLE_IDS.map((id) => createBlock(id));
+    for (const b of blocks) if ('data' in b) (b as any).data = new Uint8Array([0x00, 3, 65, 66, 67, 0x55]);
+    const header = (type: number, name: string, length: number, p1: number, p2: number) =>
+      new Uint8Array([0x00, ...encodeHeader({ type, typeName: '', name, length, param1: p1, param2: p2 }).subarray(1, 18), 0x55]);
+    return [
+      ...blocks,
+      { ...createBlock(0x10), data: header(0, 'demo      ', 131, 131, 20) } as Block,
+      { ...createBlock(0x10), data: header(3, 'demo.scr  ', 6912, 16384, 32768) } as Block,
+      { ...createBlock(0x11), data: header(1, 'nums      ', 40, 0x4100, 0) } as Block,
+      { ...createBlock(0x14), data: header(2, 'chars     ', 40, 0x0100, 0) } as Block,
+      { ...createBlock(0x21), name: 'Machine code' } as Block,
+      { ...createBlock(0x23), offset: -3 } as Block,
+      { ...createBlock(0x30), text: 'Two\r\nlines' } as Block,
+      { ...createBlock(0x31), time: 3, text: 'Grüße\nfrom 1982' } as Block,
+      { ...createBlock(0x35), ident: '  POKEs  ' } as Block,
+      { ...createBlock(0x20), pause: 0 } as Block,
+      { ...createBlock(0x2b), level: 1 } as Block,
+      ...core.parseTzx(tzx(0x5b, 3, 0, 0, 0, 1, 2, 3, 0x34, 1, 2, 3, 4, 5, 6, 7, 8)).blocks,
+    ];
+  }
+
+  it('describes every block the same way, in both number bases', () => {
+    for (const b of blocksForDescription()) {
+      for (const hex of [false, true]) {
+        expect(coreDescribe.describeBlock(b, hex)).toBe(refDescribe.describeBlock(b, hex));
+      }
+      expect(coreDescribe.blockLength(b)).toBe(refDescribe.blockLength(b));
+      expect(coreDescribe.isMetadata(b)).toBe(refDescribe.isMetadata(b));
+    }
+  });
+
+  it('describes the blocks of the sample tapes the same way', () => {
+    for (const name of fs.readdirSync(path.resolve('public/samples'))) {
+      for (const b of core.parseTape(sample(name)).blocks) {
+        expect(coreDescribe.describeBlock(b, false)).toBe(refDescribe.describeBlock(b, false));
+        expect(coreDescribe.describeBlock(b, true)).toBe(refDescribe.describeBlock(b, true));
+        expect(coreDescribe.blockLength(b)).toBe(refDescribe.blockLength(b));
+      }
+    }
+  });
+
+  it('decodes and encodes ROM headers the same way', () => {
+    for (const type of [0, 1, 2, 3, 4]) {
+      const h = { type, typeName: '', name: 'name      ', length: 100, param1: 32768, param2: 10 };
+      const bytes = refDescribe.encodeHeader(h);
+      expect(Array.from(coreDescribe.encodeHeader(h))).toEqual(Array.from(bytes));
+      expect(coreDescribe.decodeHeader(bytes)).toEqual(refDescribe.decodeHeader(bytes));
+      expect(coreDescribe.checksum(bytes)).toBe(refDescribe.checksum(bytes));
+      expect(coreDescribe.checksum(bytes, 1, 5)).toBe(refDescribe.checksum(bytes, 1, 5));
+    }
+    // Not a header: wrong length, wrong flag, unknown type.
+    for (const bad of [new Uint8Array(0), new Uint8Array(19).fill(9), new Uint8Array(18)]) {
+      expect(coreDescribe.decodeHeader(bad)).toEqual(refDescribe.decodeHeader(bad));
+    }
+  });
+
+  it('detects the same content for every block of every sample tape', () => {
+    for (const name of fs.readdirSync(path.resolve('public/samples'))) {
+      const blocks = core.parseTape(sample(name)).blocks;
+      const labels = coreContent.contentLabels(blocks);
+      blocks.forEach((b, i) => {
+        expect(coreContent.detectContent(blocks, i)).toEqual(refContent.detectContent(blocks, i));
+        const refLabel = isDataBlock(b) ? refContent.detectContent(blocks, i).label : '';
+        expect(labels[i]).toBe(refLabel);
+      });
+    }
+  });
+
+  it('detects the same content for the awkward cases', () => {
+    const withFlag = (body: number[]) => new Uint8Array([0xff, ...body, 0]);
+    const std = (data: Uint8Array) => ({ ...createBlock(0x10), data } as Block);
+    const hdr = (type: number, length: number, p1: number) =>
+      std(new Uint8Array([0x00, ...encodeHeader({ type, typeName: '', name: 'x         ', length, param1: p1, param2: 0 }).subarray(1, 18), 0x55]));
+    const cases: Block[][] = [
+      [hdr(3, 6912, 16384), std(withFlag(new Array(6912).fill(0)))],
+      [hdr(3, 6912, 40000), std(withFlag(new Array(6912).fill(0)))],
+      [hdr(3, 6912, 16384), std(withFlag(new Array(100).fill(0)))],       // short
+      [hdr(3, 120, 32768), std(withFlag(new Array(130).fill(0)))],        // long
+      [hdr(0, 40, 0), std(withFlag(new Array(40).fill(0)))],              // BASIC
+      [hdr(1, 40, 0x4100), std(withFlag(new Array(40).fill(0)))],         // number array
+      [hdr(2, 40, 0x0100), std(withFlag(new Array(40).fill(0)))],         // char array
+      [std(withFlag([0x00, 0x0a, 0x05, 0x00, 1, 2, 3, 4, 0x0d]))],        // BASIC by heuristic
+      [std(withFlag(new Array(6912).fill(1)))],                           // screen by heuristic
+      [std(withFlag([0xc3, 0x00, 0x80, 0x21, 0x00, 0x40, 0x11]))],        // plain data
+      [std(new Uint8Array(0))],                                           // empty
+      [{ ...createBlock(0x14), data: new Uint8Array([1, 2, 3]) } as Block],
+      [createBlock(0x20)],                                                // not a data block
+    ];
+    for (const blocks of cases) {
+      blocks.forEach((_b, i) => {
+        expect(coreContent.detectContent(blocks, i)).toEqual(refContent.detectContent(blocks, i));
+      });
+      expect(coreContent.contentLabels(blocks)).toEqual(
+        blocks.map((b, i) => (isDataBlock(b) ? refContent.detectContent(blocks, i).label : '')),
+      );
+      expect(coreContent.basicScore(blocks[0].id === 0x10 ? (blocks[0] as any).data : new Uint8Array(0)))
+        .toBe(refContent.basicScore(blocks[0].id === 0x10 ? (blocks[0] as any).data : new Uint8Array(0)));
+    }
+    // Out of range indices answer with the default.
+    expect(coreContent.detectContent([], 0)).toEqual(refContent.detectContent([], 0));
+    expect(coreContent.detectContent(cases[0], 9)).toEqual(refContent.detectContent(cases[0], 9));
+  });
+
+  it('finds the same consistency issues', () => {
+    const b = (id: number, fields: Record<string, unknown> = {}) => Object.assign(createBlock(id), fields) as Block;
+    const cases: Block[][] = [
+      [],
+      [b(0x21), b(0x24), b(0x22)],                                   // crossing
+      [b(0x21), b(0x21), b(0x22), b(0x22)],                          // nested group
+      [b(0x24, { count: 0 }), b(0x25), b(0x24, { count: 1 }), b(0x25)],
+      [b(0x22), b(0x25)],                                            // ends without starts
+      [b(0x23, { offset: 0 })],                                      // jump to itself
+      [b(0x23, { offset: 99 })],                                     // outside the tape
+      [b(0x26, { offsets: [] }), b(0x26, { offsets: [0, 99] })],
+      [b(0x28, { entries: [{ offset: 99, text: 'x' }] })],
+      [b(0x11, { usedBits: 0, data: new Uint8Array(0) })],
+      [b(0x15, { usedBits: 9, tstates: 0 })],
+      [b(0x10, { data: new Uint8Array([0x00, 1, 2, 3]) })],           // bad checksum
+      [b(0x12, { count: 0 }), b(0x13, { pulses: [] })],
+      [b(0x19, { totp: 2, pilotStream: [{ symbol: 5, reps: 1 }], pilotSymbols: [], totd: 8, dataSymbols: [], data: new Uint8Array(0) })],
+      [b(0x32, { entries: [] }), b(0x33, { entries: [] })],
+      [b(0x24, { count: 3 }), b(0x12), b(0x25), b(0x20)],             // a healthy loop
+      [b(0x26, { offsets: [1] }), b(0x12), b(0x27)],                  // a call that returns
+      [b(0x26, { offsets: [1] }), b(0x12)],                           // a call that never returns
+      [b(0x21)],                                                      // never closed
+      [b(0x23, { offset: 1 }), b(0x23, { offset: -1 })],              // infinite jump loop
+    ];
+    for (const blocks of cases) {
+      for (const base of [0, 1]) expect(coreCheck(blocks, base)).toEqual(refCheck(blocks, base));
+    }
+    for (const name of fs.readdirSync(path.resolve('public/samples'))) {
+      const blocks = core.parseTape(sample(name)).blocks;
+      expect(coreCheck(blocks)).toEqual(refCheck(blocks));
+    }
+  });
+
+  // The two predicates the TypeScript still implements itself. The same tables
+  // are asserted in core/tests/logic.rs, so the copies cannot drift apart.
+  it('classifies metadata blocks the way the core does', () => {
+    const metadata = [0x21, 0x22, 0x30, 0x31, 0x32, 0x33, 0x35, 0x5a];
+    for (const id of CREATABLE_IDS) {
+      expect(coreDescribe.isMetadata(createBlock(id))).toBe(metadata.includes(id));
+    }
+    const unknown = (id: number) => core.parseTzx(tzx(id, 0, 0, 0, 0)).blocks[0];
+    expect(coreDescribe.isMetadata(unknown(0x5b))).toBe(true);
+    expect(coreDescribe.isMetadata(unknown(0x16))).toBe(false);
+    expect(coreDescribe.isMetadata(unknown(0x17))).toBe(false);
+  });
+
+  it('strips flag and checksum bytes the way the core does', () => {
+    const d = new Uint8Array([0xff, 1, 2, 3, 0x55]);
+    expect(Array.from(coreContent.blockBody(d, true, true))).toEqual([1, 2, 3]);
+    expect(Array.from(coreContent.blockBody(d, true, false))).toEqual([1, 2, 3, 0x55]);
+    expect(Array.from(coreContent.blockBody(d, false, true))).toEqual([0xff, 1, 2, 3]);
+    expect(Array.from(coreContent.blockBody(d, false, false))).toEqual([0xff, 1, 2, 3, 0x55]);
+    expect(Array.from(coreContent.blockBody(new Uint8Array(0), true, true))).toEqual([]);
+    expect(Array.from(coreContent.blockBody(new Uint8Array([7]), true, true))).toEqual([]);
+  });
+
+  it('finds the same groups, programs and titles', () => {
+    const b = (id: number, fields: Record<string, unknown> = {}) => Object.assign(createBlock(id), fields) as Block;
+    const prog = (name: string) =>
+      b(0x10, { data: new Uint8Array([0x00, ...encodeHeader({ type: 0, typeName: '', name, length: 10, param1: 0, param2: 10 }).subarray(1, 18), 0x55]) });
+    const cases: Block[][] = [
+      [],
+      [prog('A         '), b(0x10), prog('B         '), b(0x10)],
+      [b(0x21, { name: 'Game' }), prog('A         '), b(0x22), b(0x21, { name: 'Empty' }), b(0x22)],
+      [b(0x21), b(0x24), b(0x25), b(0x22)],
+      [b(0x24), b(0x21), b(0x22), b(0x25), b(0x21), b(0x22)],
+      [b(0x28, { entries: [{ offset: 2, text: 'Side B' }, { offset: 99, text: 'Nope' }] }), b(0x10), prog('C         ')],
+      [b(0x32, { entries: [{ type: 0, text: 'The Tape' }] }), b(0x10)],
+      [b(0x32, { entries: [{ type: 1, text: 'No title' }] }), b(0x10)],
+      [b(0x30, { text: 'lead in' }), prog('A         '), b(0x20), prog('B         ')],
+      [b(0x21, { name: '' }), prog('          '), b(0x22)],
+    ];
+    for (const blocks of cases) {
+      expect([...corePrograms.groupRanges(blocks)]).toEqual([...refPrograms.groupRanges(blocks)]);
+      expect(corePrograms.detectPrograms(blocks)).toEqual(refPrograms.detectPrograms(blocks));
+      expect(corePrograms.tapeTitle(blocks)).toEqual(refPrograms.tapeTitle(blocks));
+    }
+    for (const name of fs.readdirSync(path.resolve('public/samples'))) {
+      const blocks = core.parseTape(sample(name)).blocks;
+      expect([...corePrograms.groupRanges(blocks)]).toEqual([...refPrograms.groupRanges(blocks)]);
+      expect(corePrograms.detectPrograms(blocks)).toEqual(refPrograms.detectPrograms(blocks));
+      expect(corePrograms.tapeTitle(blocks)).toEqual(refPrograms.tapeTitle(blocks));
     }
   });
 });

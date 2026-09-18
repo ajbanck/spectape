@@ -7,10 +7,16 @@
 //! pointer followed by that many bytes of [`crate::wire`] payload, then frees
 //! both with [`core_free`]. `src/tzx/core.ts` is the other end.
 
+use crate::consistency::check_consistency;
+use crate::content::{basic_score, content_labels, detect_content};
+use crate::describe::{block_length, checksum, decode_header, describe_block, encode_header};
 use crate::parser::{parse_tap, parse_tape, parse_tzx, ParsedTape};
+use crate::programs::{detect_programs, group_ranges, tape_title};
 use crate::types::Block;
 use crate::wire::{
-    decode_blocks, encode_bytes, encode_error, encode_tap, encode_tape, encode_version, WIRE_VERSION,
+    decode_blocks, decode_header_info, encode_bytes, encode_content, encode_described, encode_error,
+    encode_f64, encode_header_info, encode_issues, encode_opt_string, encode_programs, encode_ranges,
+    encode_strings, encode_tap, encode_tape, encode_u8, encode_version, WIRE_VERSION,
 };
 use crate::writer::{required_version, save_version, serialize_block, serialize_tap, serialize_tzx, Version};
 use std::alloc::{alloc, dealloc, Layout};
@@ -190,4 +196,126 @@ unsafe fn with_blocks(ptr: *const u8, len: usize, f: impl Fn(&[Block]) -> Vec<u8
         Err(e) => encode_error(&e.0),
     };
     finish(payload)
+}
+
+// ---- descriptions, content, consistency and programs ----------------------
+
+/// The list description of the first block in the payload, with its length
+/// column. One block per call, because the UI asks per row and caches.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_describe_block(ptr: *const u8, len: usize, hex: u32) -> *mut u8 {
+    with_blocks(ptr, len, |blocks| match blocks.first() {
+        Some(b) => encode_described(&describe_block(b, hex != 0), block_length(b)),
+        None => encode_described("", 0),
+    })
+}
+
+/// The content label of every block in the tape, in one call.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_content_labels(ptr: *const u8, len: usize) -> *mut u8 {
+    with_blocks(ptr, len, |blocks| encode_strings(&content_labels(blocks)))
+}
+
+/// What block `index` of the payload contains. The app sends the block and the
+/// one before it, which is all the detection looks at.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_detect_content(ptr: *const u8, len: usize, index: u32) -> *mut u8 {
+    with_blocks(ptr, len, |blocks| encode_content(&detect_content(blocks, index as usize)))
+}
+
+/// Structure, useless blocks, infinite loops and cross nesting. `base` is the
+/// number shown for the first block.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_check_consistency(ptr: *const u8, len: usize, base: i32) -> *mut u8 {
+    with_blocks(ptr, len, |blocks| encode_issues(&check_consistency(blocks, base)))
+}
+
+/// The programs a collection tape holds.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_detect_programs(ptr: *const u8, len: usize) -> *mut u8 {
+    with_blocks(ptr, len, |blocks| encode_programs(&detect_programs(blocks)))
+}
+
+/// Start/end pairs for the groups and loops in the tape.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_group_ranges(ptr: *const u8, len: usize) -> *mut u8 {
+    with_blocks(ptr, len, |blocks| encode_ranges(&group_ranges(blocks)))
+}
+
+/// The tape's title from its Archive info block, if it has one.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded block list.
+#[no_mangle]
+pub unsafe extern "C" fn core_tape_title(ptr: *const u8, len: usize) -> *mut u8 {
+    with_blocks(ptr, len, |blocks| encode_opt_string(tape_title(blocks).as_deref()))
+}
+
+// ---- calls that take plain bytes rather than blocks -----------------------
+
+/// Decode a standard ROM header, if these bytes are one.
+///
+/// # Safety
+/// `ptr` must point at `len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn core_decode_header(ptr: *const u8, len: usize) -> *mut u8 {
+    let data = slice(ptr, len);
+    finish(encode_header_info(decode_header(data).as_ref()))
+}
+
+/// Build the 19 bytes of a standard ROM header.
+///
+/// # Safety
+/// `ptr` must point at `len` bytes of wire-encoded header.
+#[no_mangle]
+pub unsafe extern "C" fn core_encode_header(ptr: *const u8, len: usize) -> *mut u8 {
+    let payload = match decode_header_info(slice(ptr, len)) {
+        Ok(h) => encode_bytes(&encode_header(&h)),
+        Err(e) => encode_error(&e.0),
+    };
+    finish(payload)
+}
+
+/// XOR checksum of the bytes, as the ROM loader computes it.
+///
+/// # Safety
+/// `ptr` must point at `len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn core_checksum(ptr: *const u8, len: usize) -> *mut u8 {
+    finish(encode_u8(checksum(slice(ptr, len))))
+}
+
+/// How much of this byte stream parses as BASIC lines, from 0 to 1.
+///
+/// # Safety
+/// `ptr` must point at `len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn core_basic_score(ptr: *const u8, len: usize) -> *mut u8 {
+    finish(encode_f64(basic_score(slice(ptr, len))))
+}
+
+unsafe fn slice<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
+    if ptr.is_null() || len == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(ptr, len)
+    }
 }

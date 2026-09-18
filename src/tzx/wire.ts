@@ -3,7 +3,7 @@
 // literals below declare them, which is the order `parser.ts` used to build
 // them in, so key order (and therefore anything comparing JSON) is unchanged.
 import { Reader, Writer } from './bytes';
-import { ArchiveEntry, Block, HardwareEntry, isUnknown, newUid, ParsedTape, PilotRun, SelectEntry, SymDef } from './types';
+import { ArchiveEntry, Block, ContentInfo, ContentKind, HardwareEntry, HeaderInfo, Issue, isUnknown, newUid, ParsedTape, PilotRun, Program, SelectEntry, SymDef } from './types';
 
 export const WIRE_VERSION = 1;
 const UNKNOWN_TAG = 0xff;
@@ -340,4 +340,109 @@ function writeBlock(w: Writer, b: Block, putBytes: PutBytes): void {
       putBytes(w, b.raw);
       break;
   }
+}
+
+// ---- answers for the description, content, consistency and program calls ----
+
+export function decodeStrings(buf: Uint8Array): string[] {
+  const r = new Reader(buf);
+  readHeader(r);
+  const out: string[] = [];
+  for (let n = r.u32(); n > 0; n--) out.push(str(r));
+  return out;
+}
+
+export function decodeOptString(buf: Uint8Array): string | null {
+  const r = new Reader(buf);
+  readHeader(r);
+  return r.u8() === 1 ? str(r) : null;
+}
+
+export function decodeDescribed(buf: Uint8Array): { description: string; length: number } {
+  const r = new Reader(buf);
+  readHeader(r);
+  return { description: str(r), length: r.u32() };
+}
+
+export function decodeU8(buf: Uint8Array): number {
+  const r = new Reader(buf);
+  readHeader(r);
+  return r.u8();
+}
+
+export function decodeF64(buf: Uint8Array): number {
+  const r = new Reader(buf);
+  readHeader(r);
+  return new DataView(buf.buffer, buf.byteOffset + r.pos, 8).getFloat64(0, true);
+}
+
+export function decodeRanges(buf: Uint8Array): Map<number, number> {
+  const r = new Reader(buf);
+  readHeader(r);
+  const out = new Map<number, number>();
+  for (let n = r.u32(); n > 0; n--) out.set(r.u32(), r.u32());
+  return out;
+}
+
+export function decodeContent(buf: Uint8Array): ContentInfo {
+  const r = new Reader(buf);
+  readHeader(r);
+  return {
+    kind: str(r) as ContentKind,
+    label: str(r),
+    base: r.u16(),
+    skipFlag: r.u8() === 1,
+    skipChecksum: r.u8() === 1,
+    progLen: optU16(r),
+    header: r.u8() === 1 ? headerInfo(r) : null,
+    source: str(r) as ContentInfo['source'],
+    expectedLength: optU16(r),
+  };
+}
+
+export function decodeHeaderInfo(buf: Uint8Array): HeaderInfo | null {
+  const r = new Reader(buf);
+  readHeader(r);
+  return r.u8() === 1 ? headerInfo(r) : null;
+}
+
+export function decodeIssues(buf: Uint8Array): Issue[] {
+  const r = new Reader(buf);
+  readHeader(r);
+  const out: Issue[] = [];
+  for (let n = r.u32(); n > 0; n--) {
+    const block = r.u32() | 0; // signed: -1 means the whole tape
+    out.push({ block, severity: str(r) as Issue['severity'], message: str(r) });
+  }
+  return out;
+}
+
+export function decodePrograms(buf: Uint8Array): Program[] {
+  const r = new Reader(buf);
+  readHeader(r);
+  const out: Program[] = [];
+  for (let n = r.u32(); n > 0; n--) {
+    out.push({ name: str(r), start: r.u32(), end: r.u32(), source: str(r) as Program['source'] });
+  }
+  return out;
+}
+
+/** A ROM header on its way to `core_encode_header`. */
+export function encodeHeaderInfo(h: HeaderInfo): Uint8Array {
+  const w = new Writer();
+  w.u8(h.type);
+  putStr(w, h.name);
+  w.u16(h.length);
+  w.u16(h.param1);
+  w.u16(h.param2);
+  return w.toUint8Array();
+}
+
+function optU16(r: Reader): number | null {
+  return r.u8() === 1 ? r.u16() : null;
+}
+
+function headerInfo(r: Reader): HeaderInfo {
+  const type = r.u8();
+  return { type, typeName: str(r), name: str(r), length: r.u16(), param1: r.u16(), param2: r.u16() };
 }

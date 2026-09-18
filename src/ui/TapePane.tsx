@@ -13,7 +13,7 @@ import { IconBtn } from './icons';
 import { playing, playingSide, playingBlock, stopPlayback } from '../state/player';
 import { requiredVersion } from '../tzx/writer';
 import { isDesktop } from '../platform';
-import { detectContent } from '../tzx/content';
+import { contentLabels } from '../tzx/content';
 import { useMemo } from 'preact/hooks';
 
 const DRAG_TYPE = 'application/x-spectape-blocks';
@@ -179,7 +179,8 @@ export function TapePane({ side, grow = 1 }: { side: Side; grow?: number }) {
     if (listRef.current && el) scrollRowIntoView(listRef.current, el);
   }, [t.cursor, side]);
 
-  const kinds = useMemo(() => t.blocks.map((b, i) => (isDataBlock(b) ? detectContent(t.blocks, i).label : '')), [t.blocks]);
+  // One call for the whole list: asking the core per row would send the tape across for each.
+  const kinds = useMemo(() => contentLabels(t.blocks), [t.blocks]);
   const issues = useMemo(() => {
     const by = new Map<number, Issue[]>();
     for (const is of checkConsistency(t.blocks, blockNo(0))) {

@@ -5,8 +5,12 @@
 //! calls them through.
 
 pub mod bytes;
+pub mod consistency;
+pub mod content;
+pub mod describe;
 pub mod dump;
 pub mod parser;
+pub mod programs;
 pub mod types;
 pub mod wasm;
 pub mod wire;
