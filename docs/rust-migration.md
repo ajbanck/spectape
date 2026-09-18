@@ -596,8 +596,10 @@ measurement and for the platforms that spell shortcuts "Ctrl+S"; macOS needs tho
   window views, a collapsed group with its context menu open, and both themes. This is the native
   answer to `npm run smoke`, and it catches a layout panic or a bad index before the window does.
 
-**What is left, honestly.** One is the person's; the other two are platform plumbing that
-stage 5's packaging work touches anyway:
+**What is left, honestly.** One is the person's; the other two are platform plumbing, and both are
+scheduled into stage 5 below rather than left floating here — they share one seam (the event loop
+and window handle that eframe hands out) and one verification loop (install the packaged app on the
+platform and try it), so doing them in stage 4 would mean building the packaging twice:
 
 - **The two numbers.** Cold start and a 3,000-row cursor move still have to be read off a running
   window; `npm run native` prints both commands. The boundary numbers this stage could take from a
@@ -616,6 +618,11 @@ stage 5's packaging work touches anyway:
   Until then Windows gets the egui menu bar, with the accelerators handled by `app.rs` from the
   same table — so nothing is missing, it just is not the platform's own bar.
 
+The difference in urgency between the two is worth keeping: the Apple Event is a *broken* path once
+associations are registered (double-click a tape while the app is running and nothing happens at
+all), while the Windows menu bar is a *different-looking* path that works. If stage 5 runs long,
+the first must ship and the second can slip.
+
 ### Starting stage 5
 
 The native binary becomes the desktop app. `src-tauri/` retires except for `emulator.rs`, which
@@ -625,6 +632,28 @@ the packaging: it already writes the Info.plist with the document types. The rel
 (`.github/workflows/release.yml`) is what has to change next, and the Linux download should fall
 from 76 MB to under 25 MB once WebKitGTK is gone.
 
+**What retires is the Tauri shell, not the web app.** Tauri is a desktop wrapper around the
+TypeScript UI, which is the role `native/` takes over; `src/` stays as the browser build. So the
+wasm boundary (`core/wire.rs`, `core/wasm.rs`, `scripts/build-wasm.mjs`, the size-first profile in
+`core/Cargo.toml`) keeps earning its keep, and so does `test/core.test.ts`, which runs the frozen
+TypeScript in `test/reference/` against the core through it. `native/` stays out of the cargo
+workspace for the same reason it always did.
+
+**The two platform items stage 4 left.** Both belong here, because both need the packaged app
+installed on the platform before they can be judged:
+
+1. **The macOS Apple Event.** Once the `.app` is registered with LaunchServices, double-clicking a
+   tape while SpecTape is already running sends `kAEOpenDocuments` — no argv — and today nothing
+   happens. eframe does not surface it, so it needs a winit hook at the same seam that
+   `event_loop_builder` already hands to muda. Ship this one: it is a dead path, not a cosmetic gap.
+2. **muda on Windows.** `init_for_hwnd` with the window handle out of eframe, at that same seam.
+   Optional in a way the first is not — Windows works today with the egui-drawn bar and the
+   accelerators `app.rs` handles from the same table — so it can slip to stage 6 if the packaging
+   round trips eat the time.
+
+Neither can be verified from a macOS terminal: the first needs an installed bundle, the second a
+Windows machine or a CI run.
+
 ## Stage 5 — Switch (a day, plus CI round trips)
 
 The native binary becomes the desktop app. `src-tauri/` retires except for the emulator code.
@@ -632,8 +661,15 @@ Packaging changes to plain binaries plus a `.app`, `.msi` and an AppImage that n
 WebKitGTK — the Linux download should fall from 76 MB to under 25 MB.
 
 The web app keeps the existing TypeScript UI on the wasm core, and is maintained as its own thing.
-If the browser version does not matter, delete `src/ui` here instead and the estimate shortens by
-roughly a week of parallel-maintenance work.
+**Decided, 2026-09-18:** it stays. A light local native executable next to the web application is
+the goal of the whole exercise, so the "delete `src/ui` and save a week" branch this paragraph used
+to offer is closed — do not reopen it. What that leaves is a working practice rather than a gate:
+when a feature is added, it goes into the native app, and into the browser one only if it earns its
+place there. The core protects the expensive half either way — parsing, descriptions, consistency,
+audio, BASIC and the disassembler are shared — so what can diverge is UI only, and the two already
+have (the native theme switch sits in the status bar, the web one in the menu bar; `?open=&right=`
+is argv on the native side). Parity is pinned where it matters, against `commands.ts`, by
+`native/tests/menu.rs`.
 
 ## Stage 6 — Cleanup (an hour)
 
