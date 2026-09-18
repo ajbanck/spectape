@@ -228,7 +228,9 @@ fn about_body(ui: &mut Ui, tok: &Tokens) -> Outcome {
         "Supports TZX 1.20 blocks 10–19, 20–28, 2A, 2B, 30–33, 35 and 5A; unknown and deprecated blocks are preserved untouched.",
     );
     ui.add_space(4.0);
-    w::note(ui, tok, format!("Native shell {}", env!("CARGO_PKG_VERSION")));
+    // "Native shell" until stage 6: the wording came from the Tauri build, where a
+    // shell wrapped the web app and had a version of its own to distinguish.
+    w::note(ui, tok, format!("Version {}", env!("CARGO_PKG_VERSION")));
     // Only once there is one to name: a path here is an answer to "it quit and
     // I do not know why", not a line of small print for everyone else.
     if let Some(path) = crate::crashlog::path().filter(|p| p.exists()) {
