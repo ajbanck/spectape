@@ -1,11 +1,11 @@
 name: Release desktop builds
 
-# Builds SpecTape — the native app in native/ — for macOS (universal), Linux and
+# Builds SpecTape — the desktop app in desktop/ — for macOS (universal), Linux and
 # Windows, and attaches the packages to a draft GitHub release. Runs on version
 # tags, or by hand from the Actions tab, which is the way to try the packaging
 # without cutting a release: the artifacts are attached to the run.
 #
-# Everything here is `node scripts/build-native.mjs --package`, the same command
+# Everything here is `node scripts/build-desktop.mjs --package`, the same command
 # used by hand, so a release is not a second way of building the app.
 on:
   push:
@@ -50,7 +50,7 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: native
+          workspaces: desktop
 
       # ALSA for cpal's output; the rest of the stack (winit, glutin, rfd's portal
       # dialogs, arboard) loads what it needs at runtime.
@@ -79,18 +79,18 @@ jobs:
         run: dotnet tool install --global wix --version 5.0.2
 
       - name: Build and package
-        run: node scripts/build-native.mjs --package ${{ matrix.args }}
+        run: node scripts/build-desktop.mjs --package ${{ matrix.args }}
 
       - uses: actions/upload-artifact@v7
         with:
           name: spectape-${{ matrix.name }}
           path: |
-            native/dist/*.dmg
-            native/dist/*.zip
-            native/dist/*.AppImage
-            native/dist/*.tar.gz
-            native/dist/*.msi
-            native/dist/*portable.exe
+            desktop/dist/*.dmg
+            desktop/dist/*.zip
+            desktop/dist/*.AppImage
+            desktop/dist/*.tar.gz
+            desktop/dist/*.msi
+            desktop/dist/*portable.exe
           if-no-files-found: error
 
   # Tags get a draft release with everything attached; a manual run stops above,

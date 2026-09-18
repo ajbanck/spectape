@@ -12,6 +12,10 @@ The plan is staged so that **the app stays shippable after every stage**, and so
 expensive decision (rewriting 2,223 lines of UI) is taken only after the cheap half has proven
 the conversion rate.
 
+**A note on paths.** The desktop crate lived in `native/` through stages 3–5 and is `desktop/`
+since stage 6, which renamed it. Entries below call it whatever it was called at the time; the
+current names are in CLAUDE.md.
+
 ## Where we start — and where it ended
 
 Warm launch, release build, same machine: the Tauri app on 2026-09-17, the native one on
@@ -788,7 +792,7 @@ from the same PNG with the `png` crate the screen view already uses), and the in
 covered by a headless frame test on every platform — it used to be compiled out on macOS, where
 it is developed.
 
-## Stage 6 — Cleanup (an hour)
+## Stage 6 — Cleanup (an hour) — **done, bar the Windows and Linux runs**
 
 Finish what only a real machine can answer. The dead TypeScript and CI were done in stage 5,
 because neither could wait for it, and "Where we start" was re-measured on 2026-09-18.
@@ -839,6 +843,52 @@ What is left is small and, unusually for this plan, mostly *not* code:
 - **The UI parity sweep is done** (2026-09-18). See below for what one pass turned up.
 - **The dead TypeScript is already gone**, and so are the measurements and CLAUDE.md's map, all
   done during stage 5. Stage 6 is the platforms and the rename.
+
+### What stage 6 did
+
+Done on 2026-09-18. Two of the four items in the brief above were already in before the stage
+opened — the numbers, and the parity sweep below — and one of the remaining two cannot be done from
+this machine. So what stage 6 itself did is the rename, and what it hands on is the two platform
+runs.
+
+**The rename.** `native/` is `desktop/` and the package `spectape-native` is `spectape-desktop`;
+the binary it builds was already `spectape`. `scripts/build-native.mjs` is
+`scripts/build-desktop.mjs`, which is what the three `npm run desktop*` scripts have called it
+since stage 5. The paths moved in `.gitignore`, in both workflows (rust-cache's `workspaces`, the
+three `working-directory`s in CI, the release job's six artifact globs), in README.md's layout tree
+and command list, in CLAUDE.md's map, and in the four TypeScript comments that point at the other
+build's file layer. Nothing in the crate itself referred to its own directory, so no Rust changed.
+Also gone from `build-desktop.mjs`: its closing message still asked for "the two numbers the plan
+still wants", which have been in since 2026-09-18.
+
+The brief said to rename after the platforms had been tried. It went first instead, because a
+`git mv` invalidates nothing the platforms need: the 2026-09-18 packages are still attached to that
+run and still the builds to install, and what those runs judge is a binary's behaviour on a
+machine, not the name of the directory it was compiled in. Had they been done first, the rename
+would have been the same commit afterwards.
+
+Two names deliberately did **not** change:
+
+- **`native.conf`**, the settings file beside `panic.log` in the platform's config directory
+  (`settings.rs`). Renaming it would silently throw away what an installed app remembers — theme,
+  splitter positions, the options — and no one would see anything but the loss.
+- **The word "native" where it means the platform, not the directory**: native file dialogs,
+  `eframe::run_native`, "a single native executable" in README.md. Those all still read correctly,
+  and the title of this file is one of them.
+
+**What is still owed.** Only the two platform runs, unchanged by the rename except that CI will
+build them from `desktop/` from now on:
+
+- **Windows.** Install the `.msi`, double-click a `.tzx`, and look at the menu bar. That build is
+  the first since muda was taken out, so it settles the open question above: if the black strip and
+  the menu-height click offset are gone, the revert rested on the right cause; if they survive,
+  the suspect is a display scale other than 100%, which is stage 4's bug rather than stage 5's.
+- **Linux.** Run the AppImage and the tarball binary, on Wayland and on X11 — eframe is built for
+  both, and neither has been seen.
+
+Everything checkable from a macOS terminal passes after the move: `cargo fmt --check`, `clippy
+--all-targets -D warnings` and 72 `cargo test`s in `desktop/`, 95 vitest tests, `tsc --noEmit`, and
+a build through the renamed script.
 
 ### The parity sweep
 

@@ -19,10 +19,10 @@
     "samples": "node scripts/make-samples.mjs",
     "core:wasm": "node scripts/build-wasm.mjs",
     "core:test": "cd core && cargo test",
-    "desktop": "node scripts/build-native.mjs",
-    "desktop:debug": "node scripts/build-native.mjs --debug",
-    "desktop:test": "cd native && cargo test",
-    "desktop:package": "node scripts/build-native.mjs --package",
+    "desktop": "node scripts/build-desktop.mjs",
+    "desktop:debug": "node scripts/build-desktop.mjs --debug",
+    "desktop:test": "cd desktop && cargo test",
+    "desktop:package": "node scripts/build-desktop.mjs --package",
     "core:fixtures": "node scripts/dump-blocks.mjs \"public/samples/SpecTape demo.tzx\" \"public/samples/SpecTape demo (variant).tzx\" \"public/samples/SpecTape demo.tap\""
   },
   "dependencies": {

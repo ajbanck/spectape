@@ -1,5 +1,5 @@
 [package]
-name = "spectape-native"
+name = "spectape-desktop"
 version = "0.3.3"
 description = "SpecTape, the desktop app: egui on the Rust tape core"
 license = "GPL-2.0-or-later"

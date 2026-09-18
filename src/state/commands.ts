@@ -1,4 +1,4 @@
-// The one table of user commands. The native desktop menu (menu.rs), the in-app menus and the
+// The one table of user commands. The desktop app's menu (menu.rs), the in-app menus and the
 // context menu (MenuBar.tsx) and the keyboard shortcuts (App.tsx) all resolve to an entry here,
 // so labels, enabled state and behaviour live in a single place. Ids match the item ids in menu.rs.
 import {
@@ -51,7 +51,7 @@ export const COMMANDS = {
   'open-other': { label: 'Open in other pane…', run: (s) => COMMANDS.open.run(other(s)) },
   'insert-file': { label: 'Insert file at cursor…', run: (s) => pickAndOpen(s, true) },
   /** A browser has nowhere to write back to, so Save is Save as. The desktop app writes
-   *  in place — `native/src/files.rs` keeps the id and the rule. */
+   *  in place — `desktop/src/files.rs` keeps the id and the rule. */
   'save': { label: 'Save', key: sideKey('S'), enabled: hasBlocks, run: (s) => saveTzx(s) },
   'save-as': { label: 'Save as TZX (download)', enabled: hasBlocks, run: (s) => saveTzx(s) },
   'save-tap': { label: 'Save as TAP (download)', enabled: hasBlocks, run: (s) => saveTap(s) },

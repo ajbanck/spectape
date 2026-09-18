@@ -118,7 +118,7 @@ function partProblems(side: Side, idx: number[]): string[] {
 }
 
 /** Download the tape, the part from the cursor, or the selection as a TZX to load in an
- *  emulator. The desktop app (native/) starts the emulator itself. */
+ *  emulator. The desktop app (desktop/) starts the emulator itself. */
 export function openInEmulator(side: Side, scope: EmulatorScope) {
   const t = tapes[side].value;
   const idx = emulatorIndices(side, scope);

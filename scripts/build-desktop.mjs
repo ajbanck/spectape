@@ -1,8 +1,8 @@
-// Builds SpecTape, the desktop app (native/), and packages it for the platform it
+// Builds SpecTape, the desktop app (desktop/), and packages it for the platform it
 // is run on. Stage 5 of docs/rust-migration.md: this replaced `tauri build`, so it
 // is what CI calls too — one script, so a release is the same steps a person runs.
 //
-//   node scripts/build-native.mjs [--debug] [--package] [--universal] [--no-build]
+//   node scripts/build-desktop.mjs [--debug] [--package] [--universal] [--no-build]
 //
 //   (nothing)    release build, plus SpecTape.app on macOS
 //   --debug      debug build, for a quick run
@@ -13,7 +13,7 @@
 //                  Windows  SpecTape_<version>_x64_portable.exe and, with the WiX
 //                           `wix` command on PATH, an .msi that registers .tzx/.tap
 //   --universal  macOS: build both architectures and lipo them into one binary
-//   --no-build   package what is already in native/target
+//   --no-build   package what is already in desktop/target
 //
 // It never opens a window: running the app is the person's job. On macOS the
 // binary is wrapped in an .app even for a plain build, because an unbundled
@@ -35,8 +35,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const native = join(root, 'native');
-const dist = join(native, 'dist');
+const crate = join(root, 'desktop');
+const dist = join(crate, 'dist');
 const icons = join(root, 'assets', 'icons');
 
 const args = process.argv.slice(2);
@@ -67,21 +67,21 @@ function build() {
   if (!universal) {
     if (!has('--no-build')) {
       console.log(`Building SpecTape (${profile})…`);
-      run(cargo, ['build', ...flags], { cwd: native });
+      run(cargo, ['build', ...flags], { cwd: crate });
     }
-    return join(native, 'target', profile, exe);
+    return join(crate, 'target', profile, exe);
   }
 
   // A universal macOS binary is two builds and a lipo; Rust has no fat target.
   const targets = ['aarch64-apple-darwin', 'x86_64-apple-darwin'];
-  const built = targets.map((t) => join(native, 'target', t, profile, exe));
+  const built = targets.map((t) => join(crate, 'target', t, profile, exe));
   if (!has('--no-build')) {
     for (const target of targets) {
       console.log(`Building SpecTape (${profile}, ${target})…`);
-      run(cargo, ['build', ...flags, '--target', target], { cwd: native });
+      run(cargo, ['build', ...flags, '--target', target], { cwd: crate });
     }
   }
-  const fat = join(native, 'target', `universal-${profile}`, exe);
+  const fat = join(crate, 'target', `universal-${profile}`, exe);
   mkdirSync(dirname(fat), { recursive: true });
   run('lipo', ['-create', '-output', fat, ...built]);
   return fat;
@@ -332,7 +332,7 @@ if (made.length) {
 }
 
 console.log(`
-The two numbers the plan still wants (they need the window on screen):
+The measuring commands, for when a number needs checking again (they draw a window):
   cold start   time "${bin}" --exit-on-draw
   cursor move  "${bin}" --rows 3000 --bench 200
   binary size  ${mb(bin)} MB (above)`);

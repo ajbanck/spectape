@@ -55,15 +55,15 @@ jobs:
           components: clippy, rustfmt
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: native
+          workspaces: desktop
       - name: Install Linux dependencies
         if: matrix.name == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libxkbcommon-dev libxkbcommon-x11-dev pkg-config
       - run: cargo fmt --check
-        working-directory: native
+        working-directory: desktop
       - run: cargo clippy --all-targets -- -D warnings
-        working-directory: native
+        working-directory: desktop
       - run: cargo test
-        working-directory: native
+        working-directory: desktop

@@ -45,7 +45,7 @@ function stem(name: string) {
   return name.replace(/\.(tap|tzx)$/i, '') || 'tape';
 }
 
-/** Save as TZX. The browser downloads it; the desktop app (native/) writes in place. */
+/** Save as TZX. The browser downloads it; the desktop app (desktop/) writes in place. */
 export async function saveTzx(side: Side) {
   const t = tapes[side].value;
   const v = saveVersion(t.blocks, t.loadedVersion);

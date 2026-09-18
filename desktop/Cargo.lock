@@ -3187,7 +3187,7 @@ name = "spectape-core"
 version = "0.3.3"
 
 [[package]]
-name = "spectape-native"
+name = "spectape-desktop"
 version = "0.3.3"
 dependencies = [
  "arboard",

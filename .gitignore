@@ -2,8 +2,8 @@ node_modules
 dist
 scratch
 core/target
-native/target
-native/dist
+desktop/target
+desktop/dist
 src/tzx/core.wasm.ts
 
 # Private tapes stay out of the repo; only the generated samples are tracked

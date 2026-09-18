@@ -149,7 +149,7 @@ the tape toolbar.
 ## Building from source
 
 SpecTape is two builds over one Rust core (`core/`): the desktop app is Rust and
-[egui](https://github.com/emilk/egui) (`native/`), the browser one a Vite + Preact + TypeScript
+[egui](https://github.com/emilk/egui) (`desktop/`), the browser one a Vite + Preact + TypeScript
 front end (`src/`) on the same core compiled to WebAssembly. Node 22 or newer is needed for the
 web app, a Rust toolchain for either.
 
@@ -169,7 +169,7 @@ app draws its own UI and has no web view.
 npm run desktop          # release build, plus SpecTape.app on macOS
 npm run desktop:debug    # a quicker build, for a run
 npm run desktop:test     # cargo test: headless UI frames, the store, the command table
-npm run desktop:package  # the files a release carries, into native/dist/
+npm run desktop:package  # the files a release carries, into desktop/dist/
 ```
 
 `npm run desktop:package` writes a `.dmg` and a `.zip` on macOS, an `.AppImage` (when
@@ -196,7 +196,7 @@ The browser build deliberately avoids `structuredClone`, CSS `:has()`, `color-mi
 npm run typecheck    # tsc --noEmit
 npm test             # vitest: parser/writer round trips, flow, audio, disassembler, BASIC, content detection
 npm run core:test    # cargo test in core/: the data layer, against the same cases
-npm run desktop:test # cargo test in native/: the store, the command table, headless UI frames
+npm run desktop:test # cargo test in desktop/: the store, the command table, headless UI frames
 npm run smoke        # headless-Chrome UI smoke test; screenshots land in scratch/ (dev server must be running)
 npm run samples      # regenerate the synthetic sample tapes in public/samples/
 ```
@@ -212,7 +212,7 @@ npm run samples      # regenerate the synthetic sample tapes in public/samples/
 ```
 core/          the tape core in Rust: parser, writer, descriptions, content detection,
                consistency, programs, compare, convert, audio, BASIC, screens, Z80
-native/        the desktop app: egui UI, state, commands, playback (cpal), files (rfd)
+desktop/       the desktop app: egui UI, state, commands, playback (cpal), files (rfd)
 src/tzx/       the browser build's data layer — thin wrappers over core/, compiled to wasm
 src/spectrum/  the same for the BASIC lister, screen renderer and disassembler
 src/state/     browser application state (Preact signals), undo/redo, file I/O, command table
@@ -229,7 +229,7 @@ docs/          screenshots for this README, and docs/rust-migration.md
 The two builds share everything expensive: parsing, descriptions, consistency, audio, BASIC and
 the disassembler all live in `core/`, which the desktop app links as a library and the browser one
 calls through WebAssembly. What differs is the UI, and the command table in
-`src/state/commands.ts` is checked against the desktop app's copy by `native/tests/menu.rs`.
+`src/state/commands.ts` is checked against the desktop app's copy by `desktop/tests/menu.rs`.
 
 ## Credits
 
