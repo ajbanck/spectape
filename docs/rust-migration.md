@@ -834,11 +834,50 @@ What is left is small and, unusually for this plan, mostly *not* code:
   though the binary it builds is `spectape` and it is the only desktop app there is. Renaming the
   directory is a rename of paths in three scripts, two workflows and this file — worth doing
   once the platforms above have been tried, not before.
-- **A UI parity sweep, now that it is cheap.** The four gaps above were found one at a time by
-  someone using the app. `--screenshot` against `docs/screenshot-main.png` would find the rest in
-  one pass, which is a self-contained task for a session with a clean context.
+- **The UI parity sweep is done** (2026-09-18). See below for what one pass turned up.
 - **The dead TypeScript is already gone**, and so are the measurements and CLAUDE.md's map, all
   done during stage 5. Stage 6 is the platforms and the rename.
+
+### The parity sweep
+
+One `--screenshot` of the two sample tapes against `scratch/01-main.png` — the smoke test's own
+picture, which `docs/screenshot-main.png` is a slightly older copy of (it predates the Programs
+button). Twenty-odd divergences from `src/ui/`, every one of them invisible to a test that only
+draws, and one of them a real bug:
+
+- **The editor's row buttons and its footer were off the pane.** A `TextEdit` asking for
+  `desired_width(INFINITY)` with buttons after it does not clip in egui: it *widens the enclosing
+  `Ui`*, and `set_max_width` will not shrink one back (the placer unions the new max rect with what
+  has been laid out). So Archive info's − and ↑ were drawn past the pane edge, and Commit and
+  Revert with them — under the other pane, whose background then painted over them. On the right
+  pane they were half visible; on the left, gone. Fixed by reserving the buttons' width and by
+  laying the footer out in a child `Ui` pinned to the rect the pane handed over, which is also
+  what `.editor .body { flex: 1 }` does: Commit sits at the bottom whatever the form above it is.
+  `app::tests::the_editor_footer_stays_inside_its_pane` fails against the code it was written for.
+- **The block list** was on 20px rows against the web's 26, had a zebra stripe the web has never
+  had, drew `.kind` as bare text instead of a bordered pill, set the description in a proportional
+  font where `.blocklist` is monospace throughout, dimmed the cursor row when the block was
+  metadata (`.row.cursor .desc` takes the text colour back), and had every column about 20px right
+  of where `style.css` puts it.
+- **The window's wordmark** — `.brand`, the cassette in a rounded square — was missing, and the
+  menu bar was 30px of window background rather than 44 of `--surface` under a rule. The status
+  bar had the same problem, and its cells were plain text between separators instead of `.cell`
+  pills.
+- **`.pane-head`** had no tinted band and no rule, **`.editor`** no tinted panel, and the editor
+  splitter no `::after` grab handle — just a hairline.
+- **The active pane** was ringed in full-strength accent where `.pane.active` uses `--accent-soft-2`.
+- **Play and Stop were filled**; every icon in `src/ui/icons.tsx` is `fill="none" stroke=…`.
+- **Badge ids stayed white in the dark theme**, where the web inks them `#0b1220` because the
+  category colours lighten.
+- **`↑` was a hollow box**: egui's font set has no U+2191, which is the rule about glyphs in
+  CLAUDE.md meeting the one place the port had ignored it. It and `−` are icon paths now.
+- **The screenshot itself started from black**, so anything the app did not cover read as black
+  rather than as the colour eframe clears the window to. `shot::capture` clears to `panel_fill`.
+- And the small change: 5px of padding round the panes against `.panes`' 10, an 8px gap between
+  them against `.vsplitter`'s 10, and a playback bar filled in the accent where `.fill` is `--ok`.
+
+None of this is behaviour, which is why stage 4's tests all still pass unchanged. It is the part
+of a port that only a picture can check, and the picture is now a command away.
 
 ## Total
 

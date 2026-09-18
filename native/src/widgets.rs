@@ -169,13 +169,38 @@ pub fn text(ui: &mut Ui, value: &mut String, max_len: usize, width: f32, enabled
 
 /// A multi-line field, the `<textarea class="wide">` of the forms.
 pub fn multiline(ui: &mut Ui, value: &mut String, rows: usize, enabled: bool) -> Response {
+    multiline_w(ui, value, rows, f32::INFINITY, enabled)
+}
+
+/// The same, given an explicit width. A field that asks for the rest of the row
+/// leaves nothing for the buttons after it — and egui does not clip that, it
+/// widens the enclosing `Ui`, which then carries the editor footer out of the
+/// pane. Anything with a trailing button says how wide it wants to be.
+pub fn multiline_w(ui: &mut Ui, value: &mut String, rows: usize, width: f32, enabled: bool) -> Response {
     ui.add_enabled(
         enabled,
-        TextEdit::multiline(value)
-            .desired_rows(rows)
-            .desired_width(f32::INFINITY)
-            .font(egui::TextStyle::Monospace),
+        TextEdit::multiline(value).desired_rows(rows).desired_width(width).font(egui::TextStyle::Monospace),
     )
+}
+
+/// A small framed button carrying an icon path instead of a character: the
+/// `<button class="small">` the list forms put after every row.
+pub fn icon_button(ui: &mut Ui, icon: &crate::icons::Icon, hover: &str, enabled: bool) -> Response {
+    let sense = if enabled { egui::Sense::click() } else { egui::Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(24.0, 20.0), sense);
+    let w = if !enabled {
+        ui.visuals().widgets.noninteractive
+    } else if response.is_pointer_button_down_on() {
+        ui.visuals().widgets.active
+    } else if response.hovered() {
+        ui.visuals().widgets.hovered
+    } else {
+        ui.visuals().widgets.inactive
+    };
+    ui.painter().rect(rect, w.corner_radius, w.weak_bg_fill, w.bg_stroke, egui::StrokeKind::Inside);
+    let colour = if enabled { w.fg_stroke.color } else { ui.visuals().weak_text_color() };
+    crate::icons::paint(ui.painter(), rect.shrink(5.0), icon, colour);
+    response.on_hover_text(hover)
 }
 
 pub fn check(ui: &mut Ui, label: &str, value: &mut bool, enabled: bool) -> bool {

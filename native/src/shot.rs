@@ -31,6 +31,12 @@ impl Canvas {
         Canvas { width, height, pixels: vec![Color32::BLACK; width * height] }
     }
 
+    /// Start from the colour eframe clears the window to, so a pixel nothing
+    /// covers is the app's background and not black.
+    fn clear(&mut self, colour: Color32) {
+        self.pixels.fill(colour);
+    }
+
     fn blend(&mut self, x: usize, y: usize, src: Color32) {
         if src.a() == 0 {
             return;
@@ -187,6 +193,7 @@ pub fn capture(ctx: &egui::Context, app: &mut crate::app::App, size: (f32, f32),
         let mut output = ctx.run_ui(input, |ui| app.frame(ui));
         textures.apply(&mut output.textures_delta);
         if frame + 1 == frames.max(1) {
+            canvas.clear(ctx.global_style().visuals.panel_fill);
             let primitives = ctx.tessellate(output.shapes, output.pixels_per_point);
             paint(&mut canvas, &textures, &primitives);
         }

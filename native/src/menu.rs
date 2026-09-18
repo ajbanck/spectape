@@ -176,6 +176,16 @@ mod in_window {
         queue: Queue,
     }
 
+    /// `.brand` in `style.css`: the cassette in a rounded square, then the
+    /// wordmark. This bar is the app's own, so it says whose it is.
+    fn brand(ui: &mut egui::Ui, tok: &Tokens) {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::hover());
+        ui.painter().rect_filled(rect, egui::CornerRadius::same(7), tok.brand);
+        crate::icons::paint(ui.painter(), rect.shrink(5.5), &crate::icons::CASSETTE, tok.accent_text);
+        ui.label(egui::RichText::new("SpecTape").size(13.0).strong().color(tok.text));
+        ui.add_space(8.0);
+    }
+
     impl Menu {
         pub fn new() -> Menu {
             Menu { checked: Vec::new().into(), queue: Queue::default() }
@@ -201,6 +211,7 @@ mod in_window {
             let checked = self.checked.borrow();
             let mut fired = None;
             egui::MenuBar::new().ui(ui, |ui| {
+                brand(ui, tok);
                 for menu in WINDOW_MENUS {
                     let side = menu.side.unwrap_or(active);
                     let state = &states[side];

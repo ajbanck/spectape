@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use egui::{pos2, vec2, Align2, Color32, CornerRadius, FontId, Id, Rect, Sense, Stroke, Ui};
+use egui::{pos2, vec2, Align2, CornerRadius, FontId, Id, Rect, Sense, Stroke, Ui};
 
 use spectape_core::consistency::{check_consistency, Issue, Severity};
 use spectape_core::content::content_labels;
@@ -26,7 +26,8 @@ use crate::icons;
 use crate::state::{Mark, SelectMode, Side};
 use crate::theme::Tokens;
 
-pub const ROW_H: f32 = 20.0;
+/// `.blocklist .row { height: 26px }` in `style.css`.
+pub const ROW_H: f32 = 26.0;
 
 pub struct Row {
     pub no: String,
@@ -391,6 +392,8 @@ fn draw_row(app: &App, p: &egui::Painter, ui: &mut Ui, rect: Rect, side: Side, i
     let selected = t.selected.contains(&b.uid);
     let playing = app.progress.side == Some(side) && app.playing_row(side) == Some(i);
 
+    // `.row`, `.row.selected`, `.row.cursor`, `.row:hover` — and nothing else:
+    // the web list has no zebra stripe, so neither has this one.
     if cursor {
         p.rect_filled(rect, CornerRadius::ZERO, tok.accent_soft);
         p.rect_filled(
@@ -400,7 +403,7 @@ fn draw_row(app: &App, p: &egui::Painter, ui: &mut Ui, rect: Rect, side: Side, i
         );
     } else if selected {
         p.rect_filled(rect, CornerRadius::ZERO, tok.accent_soft.gamma_multiply(0.6));
-    } else if i % 2 == 1 {
+    } else if ui.rect_contains_pointer(rect) {
         p.rect_filled(rect, CornerRadius::ZERO, tok.surface_2);
     }
     if playing {
@@ -411,31 +414,44 @@ fn draw_row(app: &App, p: &egui::Painter, ui: &mut Ui, rect: Rect, side: Side, i
         );
     }
 
+    // The column stops are `style.css`'s: a 3px cursor rule and 6px of padding,
+    // then `.num` (30px, 8px of it padding), `.badge` (24px + 8px), `.desc`.
     let y = rect.center().y;
-    let mono = FontId::monospace(11.0);
-    p.text(pos2(rect.left() + 52.0, y), Align2::RIGHT_CENTER, &row.no, mono.clone(), tok.faint);
+    let mono = FontId::monospace(12.0);
+    p.text(pos2(rect.left() + 31.0, y), Align2::RIGHT_CENTER, &row.no, FontId::monospace(11.0), tok.faint);
 
-    let badge = Rect::from_min_size(pos2(rect.left() + 60.0, y - 7.5), vec2(26.0, 15.0));
+    let badge = Rect::from_min_size(pos2(rect.left() + 39.0, y - 8.5), vec2(24.0, 17.0));
     p.rect_filled(badge, CornerRadius::same(4), tok.cat[row.cat]);
-    p.text(badge.center(), Align2::CENTER_CENTER, &row.id, FontId::monospace(10.0), Color32::WHITE);
+    // `:root[data-theme="dark"] .blocklist .row .badge` inks the id dark: the
+    // category colours lighten in the dark theme, and white on them is unread.
+    p.text(badge.center(), Align2::CENTER_CENTER, &row.id, FontId::monospace(10.0), tok.accent_text);
 
-    let mut left = rect.left() + 94.0 + row.depth as f32 * 12.0;
+    let mut left = rect.left() + 71.0 + row.depth as f32 * 12.0;
     let collapsed = t.collapsed.contains(&b.uid) && row.range_end.is_some();
     if row.range_end.is_some() {
         let caret = if collapsed { &icons::CARET_RIGHT } else { &icons::CARET_DOWN };
-        let box_ = Rect::from_center_size(pos2(left + 5.0, y), vec2(11.0, 11.0));
+        let box_ = Rect::from_center_size(pos2(left + 6.0, y), vec2(11.0, 11.0));
         icons::paint(p, box_, caret, tok.muted);
     }
-    left += 14.0;
+    left += 16.0; // `.tog`, drawn or not
 
+    // `.row.cursor .desc` takes the full text colour back off `.row.info`.
     let colour = match t.compare.get(&b.uid) {
         Some(Mark::Diff) => tok.diff,
         Some(Mark::Match) => tok.match_,
         Some(Mark::Ignored) => tok.ignored,
-        None if row.info => tok.muted,
+        None if row.info && !cursor => tok.muted,
         None => tok.text,
     };
-    let right = rect.right() - 170.0;
+    // From the right: 10px of padding, `.len` (74), `.kindcol` (96 + 10 of
+    // margin) and, when there is one, the issue mark (16 + 8).
+    let zero = app.store.settings.zero_based;
+    let issues = if collapsed {
+        range_issues(&app.rows[side], i, row.range_end.unwrap(), zero)
+    } else {
+        app.rows[side].issues.get(&i).cloned().unwrap_or_default()
+    };
+    let right = rect.right() - 190.0 - if issues.is_empty() { 0.0 } else { 24.0 };
     if right > left {
         let mut text = row.desc.clone();
         if collapsed {
@@ -443,25 +459,13 @@ fn draw_row(app: &App, p: &egui::Painter, ui: &mut Ui, rect: Rect, side: Side, i
             text.push_str(&format!(" … {hidden} block(s)"));
         }
         let clip = Rect::from_min_max(pos2(left, rect.top()), pos2(right, rect.bottom()));
-        p.with_clip_rect(clip).text(
-            pos2(left, y),
-            Align2::LEFT_CENTER,
-            text,
-            FontId::proportional(12.0),
-            colour,
-        );
+        p.with_clip_rect(clip).text(pos2(left, y), Align2::LEFT_CENTER, text, mono.clone(), colour);
     }
 
     // The consistency mark, and the tooltip it carries.
-    let zero = app.store.settings.zero_based;
-    let issues = if collapsed {
-        range_issues(&app.rows[side], i, row.range_end.unwrap(), zero)
-    } else {
-        app.rows[side].issues.get(&i).cloned().unwrap_or_default()
-    };
     if !issues.is_empty() {
         let error = issues.iter().any(|is| is.severity == Severity::Error);
-        let at = pos2(rect.right() - 176.0, y);
+        let at = pos2(rect.right() - 198.0, y);
         p.text(
             at,
             Align2::CENTER_CENTER,
@@ -476,14 +480,20 @@ fn draw_row(app: &App, p: &egui::Painter, ui: &mut Ui, rect: Rect, side: Side, i
         }
     }
 
-    p.text(
-        pos2(rect.right() - 86.0, y),
-        Align2::RIGHT_CENTER,
-        &row.kind,
-        FontId::proportional(11.0),
-        tok.muted,
-    );
-    p.text(pos2(rect.right() - 8.0, y), Align2::RIGHT_CENTER, &row.len, mono, tok.muted);
+    // `.kind` is a bordered pill, not bare text — and it takes the accent on
+    // the cursor row, the way `.row.cursor .kind` does.
+    if !row.kind.is_empty() {
+        let (fg, edge) = if cursor { (tok.accent, tok.accent) } else { (tok.muted, tok.border_strong) };
+        // `.kind`'s own `font:` shorthand nests `var(--font)`, which is itself a
+        // shorthand, so the declaration never applied: the pill has always been
+        // set in the list's monospace, at the list's size.
+        let galley = p.layout_no_wrap(row.kind.clone(), mono.clone(), fg);
+        let size = galley.size() + vec2(12.0, 6.0);
+        let pill = Rect::from_min_size(pos2(rect.right() - 88.0 - size.x, y - size.y / 2.0), size);
+        p.rect_stroke(pill, CornerRadius::same(4), Stroke::new(1.0, edge), egui::StrokeKind::Inside);
+        p.galley(pill.min + vec2(6.0, 3.0), galley, fg);
+    }
+    p.text(pos2(rect.right() - 10.0, y), Align2::RIGHT_CENTER, &row.len, mono, tok.muted);
 
     // The badge's tooltip names the block type, as its `title` does on the web.
     if ui.rect_contains_pointer(badge) {

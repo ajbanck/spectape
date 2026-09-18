@@ -29,6 +29,16 @@ use crate::widgets as w;
 
 const TSTATES_PER_SEC: f64 = 3_500_000.0;
 
+/// Where a pane's Commit button was drawn, for the headless tests.
+pub fn commit_button_id(side: Side) -> egui::Id {
+    egui::Id::new(("spectape-editor-commit", side))
+}
+
+/// What a row's trailing − and ↑ take, their spacing and the scroll area's own
+/// bar included. A row that overspends this widens the `Ui` around it, and egui
+/// will not let the footer shrink back afterwards.
+const BUTTONS_W: f32 = 78.0;
+
 /// A row that puts what does not fit on the next line instead of clipping it —
 /// what `flex-wrap` does in the web editor. egui clips overflow and shows no
 /// scrollbar, so in a narrow pane the screen thumbnail was simply swallowed:
@@ -113,6 +123,11 @@ pub fn show(app: &mut App, ui: &mut Ui, side: Side, height: f32) {
     let mut revert = false;
     let mut cannot_commit: Option<Vec<String>> = None;
 
+    // The rect the pane gave us, kept aside: a form row that overflows widens
+    // the `Ui` around it and `set_max_width` will not shrink it back (egui
+    // unions the new max rect with the content's), so the footer is laid out
+    // against this instead — never off the pane and under its neighbour.
+    let full_rect = ui.max_rect();
     ui.set_min_height(height);
     ui.vertical(|ui| {
         // ---- type row. Not a wrapping row: a row of small inline widgets wraps
@@ -159,7 +174,18 @@ pub fn show(app: &mut App, ui: &mut Ui, side: Side, height: f32) {
             }
         });
 
-        // ---- footer
+        // ---- footer, pinned to the bottom of the panel: `.editor .body` is
+        // `flex: 1`, so Commit and Revert are in the same place whatever the
+        // form above them is.
+        let foot_h = 32.0;
+        let top = ui.cursor().top().max(full_rect.bottom() - foot_h);
+        let foot = egui::Rect::from_min_size(
+            egui::pos2(full_rect.left(), top),
+            egui::vec2(full_rect.width(), (full_rect.bottom() - top).max(foot_h)),
+        );
+        let builder = egui::UiBuilder::new().max_rect(foot).layout(egui::Layout::top_down(egui::Align::Min));
+        let mut ui = ui.new_child(builder);
+        let ui = &mut ui;
         ui.separator();
         ui.horizontal(|ui| {
             if let Some(pause) = pause_of(&mut draft) {
@@ -180,7 +206,11 @@ pub fn show(app: &mut App, ui: &mut Ui, side: Side, height: f32) {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 revert = ui.add_enabled(dirty, egui::Button::new("Revert")).clicked();
-                if ui.add_enabled(dirty && !locked, egui::Button::new("Commit")).clicked() {
+                let commit = ui.add_enabled(dirty && !locked, egui::Button::new("Commit"));
+                // Under an id of its own as well, so a test can ask where the
+                // footer ended up without a pointer.
+                ui.interact(commit.rect, commit_button_id(side), egui::Sense::hover());
+                if commit.clicked() {
                     if errors.is_empty() {
                         action = Some(Action::Commit(draft.clone()));
                     } else {
@@ -729,10 +759,10 @@ impl Form<'_> {
             ui.horizontal(|ui| {
                 w::num_i16(ui, ("seloff", i), &mut e.offset, hex, !dis);
                 w::text(ui, &mut e.text, 255, 260.0, !dis);
-                if ui.add_enabled(!dis, egui::Button::new("−").small()).clicked() {
+                if w::icon_button(ui, &crate::icons::MINUS, "Remove", !dis).clicked() {
                     remove = Some(i);
                 }
-                if ui.add_enabled(!dis && i > 0, egui::Button::new("↑").small()).clicked() {
+                if w::icon_button(ui, &crate::icons::ARROW_UP, "Move up", !dis && i > 0).clicked() {
                     swap = Some(i);
                 }
             });
@@ -760,12 +790,14 @@ impl Form<'_> {
             ui.horizontal_top(|ui| {
                 w::combo(ui, ("archtype", i), &mut e.kind, &opts, 180.0, !dis);
                 let rows = if e.text.contains('\n') { 3 } else { 1 };
-                w::multiline(ui, &mut e.text, rows, !dis);
+                // Room for the − and ↑ that follow, as the web's flex row leaves.
+                let width = (ui.available_width() - BUTTONS_W).max(80.0);
+                w::multiline_w(ui, &mut e.text, rows, width, !dis);
                 truncate(&mut e.text, 255);
-                if ui.add_enabled(!dis, egui::Button::new("−").small()).clicked() {
+                if w::icon_button(ui, &crate::icons::MINUS, "Remove", !dis).clicked() {
                     remove = Some(i);
                 }
-                if ui.add_enabled(!dis && i > 0, egui::Button::new("↑").small()).clicked() {
+                if w::icon_button(ui, &crate::icons::ARROW_UP, "Move up", !dis && i > 0).clicked() {
                     swap = Some(i);
                 }
             });
@@ -795,7 +827,7 @@ impl Form<'_> {
         let mut remove = None;
         let mut swap = None;
         for (i, e) in entries.iter_mut().enumerate() {
-            ui.horizontal(|ui| {
+            wrapping_row(ui, |ui| {
                 if w::combo(ui, ("hwtype", i), &mut e.kind, &kinds, 170.0, !dis) {
                     e.id = 0;
                 }
@@ -809,10 +841,10 @@ impl Form<'_> {
                 }
                 w::combo(ui, ("hwid", i), &mut e.id, &ids, 230.0, !dis);
                 w::combo(ui, ("hwinfo", i), &mut e.info, &infos, 210.0, !dis);
-                if ui.add_enabled(!dis, egui::Button::new("−").small()).clicked() {
+                if w::icon_button(ui, &crate::icons::MINUS, "Remove", !dis).clicked() {
                     remove = Some(i);
                 }
-                if ui.add_enabled(!dis && i > 0, egui::Button::new("↑").small()).clicked() {
+                if w::icon_button(ui, &crate::icons::ARROW_UP, "Move up", !dis && i > 0).clicked() {
                     swap = Some(i);
                 }
             });

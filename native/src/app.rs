@@ -31,8 +31,10 @@ use crate::theme::{self, Tokens};
 const EDITOR_MIN: f32 = 140.0;
 const EDITOR_DEFAULT: f32 = 340.0;
 const PANE_MIN: f32 = 300.0;
-const SPLITTER_W: f32 = 8.0;
-const HEAD_H: f32 = 30.0;
+/// `.vsplitter`, the gap between the two pane cards.
+const SPLITTER_W: f32 = 10.0;
+/// `.pane-head`: 22px of side tag inside 8px of padding, plus its rule.
+const HEAD_H: f32 = 37.0;
 
 /// Blocks being dragged, and where they came from.
 pub struct Drag {
@@ -333,11 +335,19 @@ impl App {
         let tok = self.tokens;
         let active = self.store.active == side;
         ui.painter().rect_filled(rect, egui::CornerRadius::same(8), tok.surface);
+        // `.pane-head` is a band of its own, not the list's background: a tinted
+        // strip across the top of the card, ruled off from the rows below it.
+        let head = Rect::from_min_size(rect.min, vec2(rect.width(), HEAD_H));
+        ui.painter().rect_filled(head, egui::CornerRadius { nw: 8, ne: 8, sw: 0, se: 0 }, tok.surface_2);
+        ui.painter().hline(head.x_range(), head.bottom() - 0.5, egui::Stroke::new(1.0, tok.border));
         if active {
+            // `.pane.active` takes the *soft* accent, not the accent: a full
+            // strength ring round half the window is a shout, and the web
+            // never did it.
             ui.painter().rect_stroke(
                 rect,
                 egui::CornerRadius::same(8),
-                egui::Stroke::new(1.0, tok.accent),
+                egui::Stroke::new(1.0, tok.accent_soft_2),
                 egui::StrokeKind::Inside,
             );
         } else {
@@ -351,8 +361,9 @@ impl App {
         if ui.interact(rect, ui.id().with(("pane", side)), Sense::click()).clicked() {
             self.store.active = side;
         }
-        ui.add_space(4.0);
+        ui.add_space(7.0);
         self.pane_head(ui, side);
+        ui.add_space(8.0);
 
         let editor_h =
             self.store.settings.editor_height.clamp(EDITOR_MIN, (rect.height() - 160.0).max(EDITOR_MIN));
@@ -370,9 +381,19 @@ impl App {
         ui.advance_cursor_after_rect(list_rect);
 
         // The editor splitter: drag to resize, double-click to restore.
-        let bar = Rect::from_min_size(egui::pos2(rect.left(), ui.cursor().top()), vec2(rect.width(), 6.0));
+        let bar = Rect::from_min_size(egui::pos2(rect.left(), ui.cursor().top()), vec2(rect.width(), 7.0));
         let r = ui.interact(bar, ui.id().with(("hsplitter", side)), Sense::click_and_drag());
-        ui.painter().hline(bar.x_range(), bar.center().y, egui::Stroke::new(1.0, tok.border));
+        // `.splitter` and its `::after` grab handle: a tinted strip under a
+        // rule, with a 36×3 bar in the middle that takes the accent on hover.
+        ui.painter().rect_filled(bar, egui::CornerRadius::ZERO, tok.surface_2);
+        ui.painter().hline(bar.x_range(), bar.top() + 0.5, egui::Stroke::new(1.0, tok.border));
+        let grip = Rect::from_center_size(egui::pos2(bar.center().x, bar.top() + 3.5), vec2(36.0, 3.0));
+        let lit = r.hovered() || r.dragged();
+        ui.painter().rect_filled(
+            grip,
+            egui::CornerRadius::same(2),
+            if lit { tok.accent } else { tok.border_strong },
+        );
         if r.hovered() || r.dragged() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
         }
@@ -387,9 +408,16 @@ impl App {
         }
         ui.advance_cursor_after_rect(bar);
 
+        // `.editor` is a panel of its own: tinted, so the white fields on it
+        // read as fields, and rounded off at the bottom of the card.
+        let band = Rect::from_min_max(
+            egui::pos2(rect.left() + 1.0, ui.cursor().top()),
+            egui::pos2(rect.right() - 1.0, rect.bottom() - 1.0),
+        );
+        ui.painter().rect_filled(band, egui::CornerRadius { nw: 0, ne: 0, sw: 8, se: 8 }, tok.surface_2);
         let editor_rect = Rect::from_min_size(
-            egui::pos2(rect.left() + 6.0, ui.cursor().top()),
-            vec2(rect.width() - 12.0, editor_h),
+            egui::pos2(rect.left() + 12.0, ui.cursor().top() + 6.0),
+            vec2(rect.width() - 24.0, editor_h),
         );
         let builder = egui::UiBuilder::new()
             .id_salt(("editor", side))
@@ -560,9 +588,20 @@ impl App {
             // blocks even while the right one is active.
             let states = [commands::menu_state(self, 0), commands::menu_state(self, 1)];
             let mut fired = None;
-            egui::Panel::top("menubar").show(ui, |ui| {
-                fired = self.menu.bar(ui, &states, active, &self.tokens);
-            });
+            // `.menubar`: 44px of `--surface` ruled off from the panes.
+            let tok = self.tokens;
+            let out = egui::Panel::top("menubar")
+                .frame(egui::Frame::new().fill(tok.surface).inner_margin(egui::Margin {
+                    left: 12,
+                    right: 10,
+                    top: 9,
+                    bottom: 9,
+                }))
+                .show(ui, |ui| {
+                    fired = self.menu.bar(ui, &states, active, &tok);
+                });
+            let bar = out.response.rect;
+            ui.painter().hline(bar.x_range(), bar.bottom() - 0.5, egui::Stroke::new(1.0, tok.border));
             if let Some((id, side)) = fired {
                 if id == crate::menu::THEME {
                     self.store.settings.theme = self.store.settings.theme.next();
@@ -574,10 +613,21 @@ impl App {
             }
         }
 
-        egui::Panel::bottom("status").show(ui, |ui| statusbar::show(self, ui));
+        // `.statusbar`: the same surface as the menu bar, ruled off the same way.
+        let tok = self.tokens;
+        let out = egui::Panel::bottom("status")
+            .frame(egui::Frame::new().fill(tok.surface).inner_margin(egui::Margin {
+                left: 12,
+                right: 12,
+                top: 6,
+                bottom: 6,
+            }))
+            .show(ui, |ui| statusbar::show(self, ui));
+        let bar = out.response.rect;
+        ui.painter().hline(bar.x_range(), bar.top() + 0.5, egui::Stroke::new(1.0, tok.border));
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(self.tokens.bg).inner_margin(egui::Margin::same(5)))
+            .frame(egui::Frame::new().fill(self.tokens.bg).inner_margin(egui::Margin::same(10)))
             .show(ui, |ui| self.panes(ui));
         list::finish_drag(self, ctx);
 
@@ -779,6 +829,35 @@ mod tests {
             let x = settled(&ctx, &mut app, crate::dialogs::close_button_id());
             click(&ctx, &mut app, x.center());
             assert!(app.store.dialog.is_none(), "the dialog stayed open after its ✕ was clicked");
+        }
+    }
+
+    /// The editor footer belongs to its own pane. A form row that overflowed
+    /// used to widen the `Ui` around it, and egui will not shrink a `Ui` back
+    /// below what it has already laid out — so Commit and Revert were laid out
+    /// against the wider rect and drawn *past* the pane, under its neighbour,
+    /// where the neighbour's background then painted over them. Every block
+    /// type, because only some of them have a form wide enough to do it.
+    #[test]
+    fn the_editor_footer_stays_inside_its_pane() {
+        let (ctx, mut app) = app_with(every_block());
+        // The right edge of the left pane's editor panel at the size `draw`
+        // uses: half the central panel, less the 12 points `pane` insets by.
+        let editor_right = 10.0 + (1200.0 - 20.0 - SPLITTER_W) / 2.0 - 12.0;
+        for i in 0..CREATABLE_IDS.len() {
+            app.store.set_cursor(0, i as i32, SelectMode::Single);
+            for _ in 0..3 {
+                draw(&ctx, &mut app);
+            }
+            let rect = ctx
+                .read_response(crate::editor::commit_button_id(0))
+                .expect("the left pane drew a Commit button")
+                .rect;
+            assert!(
+                rect.right() <= editor_right,
+                "with the cursor on block type {i} Commit was drawn at {rect:?}, past \
+                 {editor_right} — the right edge of the left pane's editor in a 1200-point window"
+            );
         }
     }
 

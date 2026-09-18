@@ -72,9 +72,9 @@ pub const SAVE: Icon = Icon(&[
     Line(&[(8.0, 21.0), (8.0, 14.0), (16.0, 14.0), (16.0, 21.0)]),
 ]);
 
-pub const PLAY: Icon = Icon(&[Fill(&[(7.0, 4.0), (20.0, 12.0), (7.0, 20.0)])]);
+pub const PLAY: Icon = Icon(&[Closed(&[(7.0, 4.0), (20.0, 12.0), (7.0, 20.0)])]);
 
-pub const STOP: Icon = Icon(&[Fill(&[(6.0, 6.0), (18.0, 6.0), (18.0, 18.0), (6.0, 18.0)])]);
+pub const STOP: Icon = Icon(&[Closed(&[(6.0, 6.0), (18.0, 6.0), (18.0, 18.0), (6.0, 18.0)])]);
 
 pub const PLUS: Icon = Icon(&[Line(&[(12.0, 5.0), (12.0, 19.0)]), Line(&[(5.0, 12.0), (19.0, 12.0)])]);
 
@@ -164,6 +164,21 @@ pub const CARET_DOWN: Icon = Icon(&[Fill(&[(6.0, 9.0), (18.0, 9.0), (12.0, 17.0)
 
 /// The unsaved-changes dot in a pane's title.
 pub const DOT: Icon = Icon(&[Dot { c: (12.0, 12.0), r: 4.0 }]);
+
+/// The wordmark's cassette, `PATHS.cassette` in `src/ui/icons.tsx`.
+pub const CASSETTE: Icon = Icon(&[
+    Closed(&[(2.0, 6.0), (22.0, 6.0), (22.0, 18.0), (2.0, 18.0)]),
+    Circle { c: (8.0, 12.0), r: 2.0 },
+    Circle { c: (16.0, 12.0), r: 2.0 },
+    Line(&[(8.0, 18.0), (9.0, 15.0), (15.0, 15.0), (16.0, 18.0)]),
+]);
+
+/// The − and ↑ of the editor's list rows. The web writes them as characters;
+/// here they are paths, because egui's font set has no U+2191 and a missing
+/// glyph is a hollow box on the one platform that lacks it.
+pub const MINUS: Icon = Icon(&[Line(&[(6.0, 12.0), (18.0, 12.0)])]);
+pub const ARROW_UP: Icon =
+    Icon(&[Line(&[(12.0, 19.0), (12.0, 5.0)]), Line(&[(6.0, 11.0), (12.0, 5.0), (18.0, 11.0)])]);
 
 fn sample_arc(c: (f32, f32), r: f32, from: f32, to: f32) -> Vec<Pos2> {
     let sweep = to - from;
@@ -274,6 +289,9 @@ mod tests {
             ("caret right", &CARET_RIGHT),
             ("caret down", &CARET_DOWN),
             ("dot", &DOT),
+            ("cassette", &CASSETTE),
+            ("minus", &MINUS),
+            ("arrow up", &ARROW_UP),
         ];
         let ctx = egui::Context::default();
         ctx.run_ui(egui::RawInput::default(), |ui| {
